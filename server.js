@@ -13,9 +13,18 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_BASE_URL =
   process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1/chat/completions";
 
-if (!DEEPSEEK_API_KEY) {
+if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY === "your_deepseek_api_key_here") {
   console.warn(
-    "Warning: DEEPSEEK_API_KEY is not set. Chatbot requests will fail until you configure it.",
+    "⚠️  WARNING: DEEPSEEK_API_KEY is not set or still has placeholder value.",
+  );
+  console.warn(
+    "   Please edit the .env file and add your actual DeepSeek API key.",
+  );
+  console.warn(
+    "   Get your API key from: https://platform.deepseek.com/",
+  );
+  console.warn(
+    "   DEEPSEEK_API_KEY: ", DEEPSEEK_API_KEY,
   );
 }
 
@@ -47,7 +56,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const payload = {
-      model: "deepseek-chat", // adjust if your DeepSeek model name is different
+      model: "deepseek-chat", // Common model names: "deepseek-chat", "deepseek-reasoner", "deepseek-coder"
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContent },
@@ -68,7 +77,19 @@ app.post("/api/chat", async (req, res) => {
     if (!response.ok) {
       const text = await response.text();
       console.error("DeepSeek API error:", response.status, text);
-      return res.status(502).json({ error: "Upstream DeepSeek API error." });
+      let errorMessage = "Upstream DeepSeek API error.";
+      try {
+        const errorData = JSON.parse(text);
+        if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        }
+      } catch (e) {
+        // Use default error message if parsing fails
+      }
+      return res.status(502).json({ 
+        error: errorMessage,
+        details: `Status: ${response.status}. Check your API key and model name.`
+      });
     }
 
     const data = await response.json();

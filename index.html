@@ -22,6 +22,23 @@
     <main class="app-main">
       <!-- Left Sidebar -->
       <aside class="sidebar">
+        <!-- Goals Section -->
+        <section class="panel panel-goals">
+          <div class="panel-header">
+            <h2>Long-Term Goals</h2>
+            <span class="panel-subtitle">Create goals to organize your tasks</span>
+          </div>
+          <div class="goals-content">
+            <button type="button" id="addGoalBtn" class="btn-add-goal" title="Add a new goal">
+              <span class="btn-add-goal-icon">+</span>
+              <span>Add Long-Term Goal</span>
+            </button>
+            <div id="goalsList" class="goals-list">
+              <!-- Goals populated by JS -->
+            </div>
+          </div>
+        </section>
+
         <!-- To-Do List -->
         <section class="panel panel-tasks">
           <div class="panel-header">
@@ -145,43 +162,39 @@
                 </div>
 
                 <div id="procrastinator_yes" class="conditional-row hidden">
-                  <div class="two-col">
-                    <label>
-                      Procrastinator type
-                      <select id="procrastinator_type">
-                        <option value="">Select...</option>
-                        <option>Perfectionist</option>
-                        <option>Works better under pressure</option>
-                        <option>Dreamer</option>
-                      </select>
-                    </label>
-                    <div class="button-group" id="works_best_group">
-                      <span class="label-inline">You work best...</span>
-                      <button type="button" data-value="Under Pressure">Under Pressure</button>
-                      <button type="button" data-value="With abundant time">With abundant time</button>
-                      <input type="hidden" id="works_best" />
-                    </div>
-                  </div>
+                  <label>
+                    Procrastinator type
+                    <select id="procrastinator_type">
+                      <option value="">Select...</option>
+                      <option>perfectionist</option>
+                      <option>avoidant</option>
+                      <option>deadline-driven</option>
+                      <option>overwhelmed</option>
+                      <option>distraction</option>
+                      <option>lack-of-motivation</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div id="procrastinator_no" class="conditional-row hidden">
-                  <div class="two-col">
-                    <div class="button-group" id="has_trouble_finishing_group">
-                      <span class="label-inline">Do you have trouble finishing?</span>
-                      <button type="button" data-value="Yes, sometimes">Yes, sometimes</button>
-                      <button type="button" data-value="No, I'm consistent">No, I'm consistent</button>
-                      <input type="hidden" id="has_trouble_finishing" />
-                    </div>
-                    <label>
-                      Preferred work style
-                      <select id="preferred_work_style">
-                        <option value="">Select...</option>
-                        <option>Short, focused bursts</option>
-                        <option>Long, deep sessions</option>
-                        <option>A mix of both</option>
-                      </select>
-                    </label>
+                  <div class="button-group" id="has_trouble_finishing_group">
+                    <span class="label-inline">Do you have trouble finishing?</span>
+                    <button type="button" data-value="Yes, sometimes">Yes, sometimes</button>
+                    <button type="button" data-value="No, I'm consistent">No, I'm consistent</button>
+                    <input type="hidden" id="has_trouble_finishing" />
                   </div>
+                </div>
+
+                <div class="two-col">
+                  <label>
+                    Preferred work style
+                    <select id="preferred_work_style">
+                      <option value="">Select...</option>
+                      <option>Short, focused bursts</option>
+                      <option>Long, deep sessions</option>
+                      <option>A mix of both</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div class="two-col">
@@ -274,6 +287,18 @@
                 </button>
                 <input type="hidden" id="task_priority" />
               </div>
+
+              <label>
+                Category
+                <select id="task_category" required>
+                  <option value="">Select...</option>
+                  <option value="study">Study</option>
+                  <option value="project">Project</option>
+                  <option value="chores">Chores</option>
+                  <option value="personal">Personal</option>
+                  <option value="social">Social</option>
+                </select>
+              </label>
 
               <div class="two-col">
                 <label>
@@ -380,13 +405,41 @@
       </section>
     </main>
 
-    <!-- Countdown overlay for "Under Pressure" users -->
+    <!-- Countdown overlay for deadline-driven procrastinators -->
     <div id="countdownOverlay" class="countdown-overlay hidden">
       <div class="countdown-card">
         <h3>Focus countdown</h3>
         <p id="countdownTaskName"></p>
         <div id="countdownTimer" class="countdown-timer">25:00</div>
         <button id="stopCountdownBtn" class="btn btn-secondary">Stop</button>
+      </div>
+    </div>
+
+    <!-- Pomodoro Timer Modal -->
+    <div id="pomodoroModal" class="pomodoro-modal hidden">
+      <div class="pomodoro-modal-content">
+        <div class="pomodoro-header">
+          <h2>Focus Timer</h2>
+          <button id="closePomodoroBtn" class="pomodoro-close-btn" title="Close">×</button>
+        </div>
+        <div class="pomodoro-task-info">
+          <p id="pomodoroTaskName" class="pomodoro-task-name"></p>
+          <p id="pomodoroTaskCategory" class="pomodoro-task-category"></p>
+        </div>
+        <div class="pomodoro-timer-display">
+          <div id="pomodoroTimer" class="pomodoro-timer">25:00</div>
+          <div class="pomodoro-status" id="pomodoroStatus">Ready to start</div>
+        </div>
+        <div class="pomodoro-controls">
+          <button id="pomodoroStartBtn" class="btn btn-primary pomodoro-btn">Start</button>
+          <button id="pomodoroPauseBtn" class="btn btn-secondary pomodoro-btn hidden">Pause</button>
+          <button id="pomodoroResetBtn" class="btn btn-secondary pomodoro-btn">Reset</button>
+        </div>
+        <div class="pomodoro-progress">
+          <div id="pomodoroProgressBar" class="pomodoro-progress-bar">
+            <div id="pomodoroProgressFill" class="pomodoro-progress-fill"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
