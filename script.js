@@ -1,7 +1,8 @@
-// PlanWise - AI Student Planner
-// This file wires up onboarding, task management, scheduling, calendar rendering, chatbot, and localStorage.
+// Axis - AI Student Planner
+// This file wires up authentication, onboarding, task management, scheduling, calendar rendering, chatbot, and user data persistence.
 
-const STORAGE_KEY = "planwise_state_v1";
+const STORAGE_KEY = "planwise_auth_token";
+const STORAGE_USER_KEY = "planwise_user";
 
 const PRIORITY_WEIGHTS = {
   "Urgent & Important": 1,
@@ -26,35 +27,135 @@ let state = {
   rankedTasks: [],
   schedule: [], // array of {kind: 'task', taskId, start: Date ISO, end: Date ISO}
   fixedBlocks: [], // array of {kind: 'fixed', label, start, end, category}
-  goals: [], // array of {id, name, color}
+  goals: [], // array of {id, name, color, level: 'lifetime'|'yearly'|'monthly'|'weekly'|'daily', parentId}
+  reflections: [], // array of {id, type: 'daily'|'weekly'|'monthly', date, content, analysis}
+  blockingRules: [], // array of {id, domain, action: 'block'|'redirect', redirectUrl}
+  firstReflectionDueDate: null, // ISO date string for when first weekly reflection is due (7 days after signup)
 };
+
+// Authentication state
+let authToken = null;
+let currentUser = null;
 
 // Currently edited task (if any)
 let editingTaskId = null;
 
-// ---------- Utility ----------
+// Onboarding display mode: null | "personalization-only"
+let onboardingMode = null;
+let shouldShowOnboarding = false;
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn("Unable to persist state:", e);
+// ---------- Authentication & API ----------
+
+function getAuthToken() {
+  return localStorage.getItem(STORAGE_KEY);
+}
+
+function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem(STORAGE_KEY, token);
+    authToken = token;
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_USER_KEY);
+    authToken = null;
+    currentUser = null;
   }
 }
 
-function loadState() {
+function getAuthHeaders() {
+  const token = getAuthToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+async function loadUserData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    state = parsed;
-    // Migrate old profile data to new format
+    const token = getAuthToken();
+    if (!token) return false;
+
+    const res = await fetch("/api/user/data", {
+      headers: getAuthHeaders(),
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        setAuthToken(null);
+        return false;
+      }
+      throw new Error("Failed to load user data");
+    }
+
+    const data = await res.json();
+    state = {
+      profile: data.profile || null,
+      tasks: data.tasks || [],
+      rankedTasks: data.rankedTasks || [],
+      schedule: data.schedule || [],
+      fixedBlocks: data.fixedBlocks || [],
+      goals: data.goals || [],
+      reflections: data.reflections || [],
+      blockingRules: data.blockingRules || [],
+      dailyHabits: data.dailyHabits || [],
+      firstReflectionDueDate: data.firstReflectionDueDate || null,
+    };
+    
+    // Initialize firstReflectionDueDate if it doesn't exist (for existing users)
+    if (!state.firstReflectionDueDate && state.reflections && state.reflections.length === 0) {
+      // Set first reflection due date to 7 days from now
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 7);
+      state.firstReflectionDueDate = dueDate.toISOString();
+      saveUserData();
+    }
+
     migrateProfileData();
-    // Backfill any missing task IDs from older data
+    migrateGoalsData();
     ensureTaskIds();
-  } catch (e) {
-    console.warn("Unable to load saved state:", e);
+    return true;
+  } catch (err) {
+    console.error("Error loading user data:", err);
+    return false;
   }
+}
+
+async function saveUserData() {
+  try {
+    const token = getAuthToken();
+    if (!token) {
+      console.warn("No auth token, cannot save user data");
+      return;
+    }
+
+    const res = await fetch("/api/user/data", {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(state),
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        setAuthToken(null);
+        showAuthScreen();
+        return;
+      }
+      throw new Error("Failed to save user data");
+    }
+  } catch (err) {
+    console.error("Error saving user data:", err);
+  }
+}
+
+// Legacy localStorage save (for backward compatibility during migration)
+function saveState() {
+  saveUserData();
+}
+
+// Legacy localStorage load (for backward compatibility during migration)
+function loadState() {
+  // This is now handled by loadUserData()
+  return loadUserData();
 }
 
 // Migrate old profile data to new format
@@ -96,8 +197,29 @@ function migrateProfileData() {
   
   // Save migrated data back to state
   if (migrated) {
-    saveState();
+    saveUserData();
     console.log("Profile data migrated to new format");
+  }
+}
+
+// Migrate old goals data to new format
+function migrateGoalsData() {
+  if (!state.goals || !Array.isArray(state.goals)) return;
+  
+  let migrated = false;
+  
+  // Set level: "lifetime" on all goals that lack this property
+  state.goals.forEach((goal) => {
+    if (!goal.level) {
+      goal.level = "lifetime";
+      migrated = true;
+    }
+  });
+  
+  // Save migrated data back to state
+  if (migrated) {
+    saveUserData();
+    console.log("Goals data migrated to new format");
   }
 }
 
@@ -139,18 +261,53 @@ function $all(selector) {
   return Array.from(document.querySelectorAll(selector));
 }
 
+function applyOnboardingModeUI() {
+  const stepsToHide = ["2", "3"];
+  stepsToHide.forEach((step) => {
+    const stepEl = document.querySelector(`.wizard-step[data-step="${step}"]`);
+    const indicatorEl = document.querySelector(
+      `.wizard-step-indicator[data-step="${step}"]`,
+    );
+    const hidden = onboardingMode === "personalization-only";
+    if (stepEl) {
+      stepEl.classList.toggle("hidden", hidden);
+      stepEl.style.display = hidden ? "none" : "";
+    }
+    if (indicatorEl) {
+      indicatorEl.classList.toggle("hidden", hidden);
+      indicatorEl.style.display = hidden ? "none" : "";
+    }
+  });
+}
+
 function setStep(step) {
-  $all(".wizard-step").forEach((el) => {
-    el.classList.toggle("active", el.dataset.step === String(step));
-  });
-  $all(".wizard-step-indicator").forEach((el) => {
-    el.classList.toggle("active", el.dataset.step === String(step));
-  });
+  const wizard = $("#wizard");
+  if (!wizard) return;
+  
+  // In personalization-only mode, force step 1 and hide later steps
+  if (onboardingMode === "personalization-only" && step && step !== 1) {
+    step = 1;
+  }
+  applyOnboardingModeUI();
+
+  // Show wizard modal if step is set (during onboarding)
+  if (step) {
+    wizard.classList.remove("hidden");
+    $all(".wizard-step").forEach((el) => {
+      el.classList.toggle("active", el.dataset.step === String(step));
+    });
+    $all(".wizard-step-indicator").forEach((el) => {
+      el.classList.toggle("active", el.dataset.step === String(step));
+    });
+  } else {
+    // Hide wizard modal if no step (dashboard mode)
+    wizard.classList.add("hidden");
+  }
 }
 
 function showToast(message) {
   // Small, non-intrusive toast using alert as fallback for simplicity
-  console.log("[PlanWise]", message);
+  console.log("[Axis]", message);
 }
 
 // ---------- Pomodoro Timer ----------
@@ -312,17 +469,44 @@ function resetPomodoroTimer() {
 }
 
 function initPomodoroTimer() {
-  $("#pomodoroStartBtn")?.addEventListener("click", startPomodoroTimer);
-  $("#pomodoroPauseBtn")?.addEventListener("click", pausePomodoroTimer);
-  $("#pomodoroResetBtn")?.addEventListener("click", resetPomodoroTimer);
-  $("#closePomodoroBtn")?.addEventListener("click", closePomodoroTimer);
+  // Remove existing listeners by cloning and replacing elements
+  const pomodoroStartBtn = $("#pomodoroStartBtn");
+  if (pomodoroStartBtn) {
+    const newBtn = pomodoroStartBtn.cloneNode(true);
+    pomodoroStartBtn.parentNode?.replaceChild(newBtn, pomodoroStartBtn);
+    newBtn.addEventListener("click", startPomodoroTimer);
+  }
   
-  // Close on background click
-  $("#pomodoroModal")?.addEventListener("click", (e) => {
-    if (e.target.id === "pomodoroModal") {
-      closePomodoroTimer();
-    }
-  });
+  const pomodoroPauseBtn = $("#pomodoroPauseBtn");
+  if (pomodoroPauseBtn) {
+    const newBtn = pomodoroPauseBtn.cloneNode(true);
+    pomodoroPauseBtn.parentNode?.replaceChild(newBtn, pomodoroPauseBtn);
+    newBtn.addEventListener("click", pausePomodoroTimer);
+  }
+  
+  const pomodoroResetBtn = $("#pomodoroResetBtn");
+  if (pomodoroResetBtn) {
+    const newBtn = pomodoroResetBtn.cloneNode(true);
+    pomodoroResetBtn.parentNode?.replaceChild(newBtn, pomodoroResetBtn);
+    newBtn.addEventListener("click", resetPomodoroTimer);
+  }
+  
+  const closePomodoroBtn = $("#closePomodoroBtn");
+  if (closePomodoroBtn) {
+    const newBtn = closePomodoroBtn.cloneNode(true);
+    closePomodoroBtn.parentNode?.replaceChild(newBtn, closePomodoroBtn);
+    newBtn.addEventListener("click", closePomodoroTimer);
+  }
+  
+  // Close on background click - use onclick to replace handler
+  const pomodoroModal = $("#pomodoroModal");
+  if (pomodoroModal) {
+    pomodoroModal.onclick = (e) => {
+      if (e.target.id === "pomodoroModal") {
+        closePomodoroTimer();
+      }
+    };
+  }
   
   // Request notification permission
   if ("Notification" in window && Notification.permission === "default") {
@@ -330,21 +514,489 @@ function initPomodoroTimer() {
   }
 }
 
+// ---------- Authentication UI ----------
+
+function showAuthScreen() {
+  $("#authScreen")?.classList.remove("hidden");
+  $("#dashboard")?.classList.add("hidden");
+}
+
+function hideAuthScreen() {
+  $("#authScreen")?.classList.add("hidden");
+  $("#dashboard")?.classList.remove("hidden");
+}
+
+function showError(elementId, message) {
+  const errorEl = $(elementId);
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+  }
+}
+
+function hideError(elementId) {
+  const errorEl = $(elementId);
+  if (errorEl) {
+    errorEl.classList.add("hidden");
+  }
+}
+
+async function handleLogin(email, password) {
+  try {
+    hideError("#authError");
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      console.error("Failed to parse response:", parseErr);
+      showError("#authError", `Server error (${res.status}). Please check if the server is running.`);
+      return false;
+    }
+
+    if (!res.ok) {
+      showError("#authError", data.error || `Login failed (${res.status})`);
+      return false;
+    }
+
+    if (!data.token || !data.user) {
+      showError("#authError", "Invalid response from server");
+      return false;
+    }
+
+    setAuthToken(data.token);
+    currentUser = data.user;
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+    
+    // Logins should not trigger onboarding wizard
+    onboardingMode = null;
+    shouldShowOnboarding = false;
+
+    await loadUserData();
+    hideAuthScreen();
+    // Initialize all dashboard features
+    initWeeklyScheduleInputs();
+    initWeekendScheduleInputs();
+    initDeadlineTimeOptions();
+    initProfileInteractions();
+    initTaskForm();
+    initWizardButtons();
+    initChatbot();
+    initCalendarViewToggle();
+    initGoals();
+    initDailyHabits();
+    initPomodoroTimer();
+    restoreFromState();
+    // Start periodic reflection checker
+    startReflectionChecker();
+    return true;
+  } catch (err) {
+    console.error("Login error:", err);
+    if (err.message && err.message.includes("fetch")) {
+      showError("#authError", "Cannot connect to server. Please make sure the server is running on port 3000.");
+    } else {
+      showError("#authError", "Network error. Please try again.");
+    }
+    return false;
+  }
+}
+
+async function handleSignup(name, email, password) {
+  try {
+    hideError("#signupError");
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      console.error("Failed to parse response:", parseErr);
+      showError("#signupError", `Server error (${res.status}). Please check if the server is running.`);
+      return false;
+    }
+
+    if (!res.ok) {
+      showError("#signupError", data.error || `Signup failed (${res.status})`);
+      return false;
+    }
+
+    if (!data.token || !data.user) {
+      showError("#signupError", "Invalid response from server");
+      return false;
+    }
+
+    setAuthToken(data.token);
+    currentUser = data.user;
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+    
+    // New signups should see personalization only (no tasks/confirm steps)
+    onboardingMode = "personalization-only";
+    shouldShowOnboarding = true;
+    applyOnboardingModeUI();
+
+    await loadUserData();
+    hideAuthScreen();
+    // Initialize all dashboard features
+    initWeeklyScheduleInputs();
+    initWeekendScheduleInputs();
+    initDeadlineTimeOptions();
+    initProfileInteractions();
+    initTaskForm();
+    initWizardButtons();
+    initChatbot();
+    initCalendarViewToggle();
+    initGoals();
+    initPomodoroTimer();
+    // Show personalization-only onboarding for new users (only during signup)
+    if (shouldShowOnboarding && !state.profile) {
+      setStep(1);
+      initOnboardingGoals();
+    } else {
+      restoreFromState();
+      startReflectionChecker();
+    }
+    return true;
+  } catch (err) {
+    console.error("Signup error:", err);
+    if (err.message && err.message.includes("fetch")) {
+      showError("#signupError", "Cannot connect to server. Please make sure the server is running on port 3000.");
+    } else {
+      showError("#signupError", "Network error. Please try again.");
+    }
+    return false;
+  }
+}
+
+async function handleGoogleAuth() {
+  // For now, show a message that Google OAuth needs to be configured
+  // In production, this would integrate with Google OAuth
+  alert("Google OAuth integration requires additional setup. Please use email/password for now.");
+}
+
+function handleLogout() {
+  if (confirm("Are you sure you want to logout?")) {
+    // Stop reflection checker
+    stopReflectionChecker();
+    setAuthToken(null);
+    state = {
+      profile: null,
+      tasks: [],
+      rankedTasks: [],
+      schedule: [],
+      fixedBlocks: [],
+      goals: [],
+      reflections: [],
+      blockingRules: [],
+      dailyHabits: [],
+    };
+    showAuthScreen();
+  }
+}
+
+function initAuth() {
+  // Auth tab switching
+  $all(".auth-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const targetTab = tab.dataset.tab;
+      $all(".auth-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === targetTab));
+      $all(".auth-form").forEach((f) => f.classList.toggle("active", f.id === `${targetTab}Form`));
+      hideError("#authError");
+      hideError("#signupError");
+    });
+  });
+
+  // Login form
+  $("#loginFormElement")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = $("#loginEmail").value.trim();
+    const password = $("#loginPassword").value;
+    await handleLogin(email, password);
+  });
+
+  // Signup form
+  $("#signupFormElement")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("#signupName").value.trim();
+    const email = $("#signupEmail").value.trim();
+    const password = $("#signupPassword").value;
+    if (password.length < 8) {
+      showError("#signupError", "Password must be at least 8 characters");
+      return;
+    }
+    await handleSignup(name, email, password);
+  });
+
+  // Google auth buttons
+  $("#googleLoginBtn")?.addEventListener("click", handleGoogleAuth);
+  $("#googleSignupBtn")?.addEventListener("click", handleGoogleAuth);
+
+  // Logout button
+  $("#logoutBtn")?.addEventListener("click", handleLogout);
+
+  // Settings button
+  $("#settingsBtn")?.addEventListener("click", () => {
+    $("#settingsPanel")?.classList.remove("hidden");
+    initSettings();
+  });
+
+  $("#closeSettingsBtn")?.addEventListener("click", () => {
+    $("#settingsPanel")?.classList.add("hidden");
+  });
+
+  $("#settingsPanel .settings-overlay")?.addEventListener("click", () => {
+    $("#settingsPanel")?.classList.add("hidden");
+  });
+
+  // Settings tabs
+  $all(".settings-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const targetTab = tab.dataset.tab;
+      $all(".settings-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === targetTab));
+      $all(".settings-section").forEach((s) => s.classList.toggle("active", s.id === `settings${targetTab.charAt(0).toUpperCase() + targetTab.slice(1)}`));
+    });
+  });
+}
+
+function renderGoalsHierarchy() {
+  const container = $("#goalsHierarchy");
+  if (!container) return;
+
+  const levels = ["lifetime", "yearly", "monthly", "weekly", "daily"];
+  container.innerHTML = "";
+
+  levels.forEach((level) => {
+    const levelGoals = (state.goals || []).filter((g) => g.level === level);
+    const section = document.createElement("div");
+    section.className = "goals-hierarchy-level";
+    section.innerHTML = `
+      <h4>${level.charAt(0).toUpperCase() + level.slice(1)} Goals</h4>
+      <div class="goals-hierarchy-list" data-level="${level}">
+        ${levelGoals.length === 0 ? '<p class="goals-empty-hint">No goals yet</p>' : ""}
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-add-goal-level="${level}">Add ${level} goal</button>
+    `;
+    container.appendChild(section);
+
+    levelGoals.forEach((goal) => {
+      const goalEl = document.createElement("div");
+      goalEl.className = "goals-hierarchy-item";
+      goalEl.innerHTML = `
+        <span style="color: ${goal.color?.text || '#000'}">${goal.name}</span>
+        <button type="button" class="btn-icon-sm" data-delete-goal="${goal.id}">×</button>
+      `;
+      section.querySelector(`[data-level="${level}"]`).appendChild(goalEl);
+    });
+  });
+
+  // Add goal handlers
+  container.onclick = (e) => {
+    const addBtn = e.target.closest("[data-add-goal-level]");
+    if (addBtn) {
+      const level = addBtn.dataset.addGoalLevel;
+      const name = prompt(`Enter ${level} goal name:`);
+      if (name && name.trim()) {
+        addGoal(name.trim(), level);
+        renderGoalsHierarchy();
+      }
+      return;
+    }
+
+    const deleteBtn = e.target.closest("[data-delete-goal]");
+    if (deleteBtn) {
+      const goalId = deleteBtn.dataset.deleteGoal;
+      deleteGoal(goalId);
+      renderGoalsHierarchy();
+    }
+  };
+}
+
+function renderBlockingRules() {
+  const container = $("#blockingRulesList");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  if (!state.blockingRules || state.blockingRules.length === 0) {
+    container.innerHTML = '<p class="settings-description">No blocking rules configured yet.</p>';
+    return;
+  }
+
+  state.blockingRules.forEach((rule) => {
+    const ruleEl = document.createElement("div");
+    ruleEl.className = "blocking-rule-item";
+    ruleEl.innerHTML = `
+      <div>
+        <strong>${rule.domain}</strong>
+        <span class="blocking-rule-action">${rule.action === "block" ? "Block" : `Redirect to ${rule.redirectUrl || ""}`}</span>
+      </div>
+      <button type="button" class="btn-icon-sm" data-delete-rule="${rule.id}">×</button>
+    `;
+    container.appendChild(ruleEl);
+  });
+
+  container.onclick = (e) => {
+    const deleteBtn = e.target.closest("[data-delete-rule]");
+    if (deleteBtn) {
+      const ruleId = deleteBtn.dataset.deleteRule;
+      state.blockingRules = state.blockingRules.filter((r) => r.id !== ruleId);
+      saveUserData();
+      renderBlockingRules();
+    }
+  };
+}
+
+// Initialize blocking rules button handler once (not in renderBlockingRules to avoid accumulation)
+function initBlockingRulesButton() {
+  const addBtn = $("#addBlockingRuleBtn");
+  if (!addBtn) return;
+  
+  // Remove existing listener if any (by cloning and replacing)
+  const newBtn = addBtn.cloneNode(true);
+  addBtn.parentNode?.replaceChild(newBtn, addBtn);
+  
+  newBtn.addEventListener("click", () => {
+    const domain = prompt("Enter domain to block (e.g., youtube.com):");
+    if (!domain) return;
+
+    const action = confirm("Block completely? (Cancel = Redirect)") ? "block" : "redirect";
+    let redirectUrl = "";
+    if (action === "redirect") {
+      redirectUrl = prompt("Enter redirect URL (e.g., youtube.com/feed/subscriptions):") || "";
+    }
+
+    const rule = {
+      id: `rule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      domain: domain.trim(),
+      action,
+      redirectUrl,
+    };
+
+    if (!state.blockingRules) state.blockingRules = [];
+    state.blockingRules.push(rule);
+    saveUserData();
+    renderBlockingRules();
+  });
+}
+
+function renderReflectionsList() {
+  const container = $("#reflectionsList");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  if (!state.reflections || state.reflections.length === 0) {
+    container.innerHTML = '<p class="settings-description">No reflections yet.</p>';
+    return;
+  }
+
+  const sorted = [...state.reflections].sort((a, b) => new Date(b.date) - new Date(a.date));
+  sorted.forEach((reflection) => {
+    const refEl = document.createElement("div");
+    refEl.className = "reflection-item";
+    refEl.innerHTML = `
+      <div>
+        <strong>${reflection.type.charAt(0).toUpperCase() + reflection.type.slice(1)} Reflection</strong>
+        <span class="reflection-date">${new Date(reflection.date).toLocaleDateString()}</span>
+      </div>
+      <p class="reflection-preview">${reflection.content.substring(0, 100)}${reflection.content.length > 100 ? "..." : ""}</p>
+      ${reflection.analysis ? `<div class="reflection-analysis">AI Analysis: ${reflection.analysis}</div>` : ""}
+    `;
+    container.appendChild(refEl);
+  });
+}
+
+// Initialize profile edit form handler once (not in initSettings to avoid accumulation)
+function initProfileEditForm() {
+  const form = $("#profileEditForm");
+  if (!form) return;
+  
+  // Remove existing listener if any (by cloning and replacing)
+  const newForm = form.cloneNode(true);
+  form.parentNode?.replaceChild(newForm, form);
+  
+  newForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("#profileEditName").value.trim();
+    if (!name) {
+      alert("Name is required");
+      return;
+    }
+    // Update user name (would need backend endpoint for this)
+    currentUser.name = name;
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(currentUser));
+    alert("Profile updated");
+  });
+}
+
+function initSettings() {
+  // Load current user info
+  if (currentUser) {
+    $("#profileEditName").value = currentUser.name || "";
+    $("#profileEditEmail").value = currentUser.email || "";
+  }
+
+  // Initialize profile edit form (only once)
+  initProfileEditForm();
+
+  // Render goals hierarchy
+  renderGoalsHierarchy();
+
+  // Render blocking rules
+  renderBlockingRules();
+  
+  // Initialize blocking rules button (only once)
+  initBlockingRulesButton();
+
+  // Render reflections
+  renderReflectionsList();
+}
+
 // ---------- Initialization ----------
 
-document.addEventListener("DOMContentLoaded", () => {
-  loadState();
-  initWeeklyScheduleInputs();
-  initWeekendScheduleInputs();
-  initDeadlineTimeOptions();
-  initProfileInteractions();
-  initTaskForm();
-  initWizardButtons();
-  initChatbot();
-  initCalendarViewToggle();
-  initGoals();
-  initPomodoroTimer();
-  restoreFromState();
+document.addEventListener("DOMContentLoaded", async () => {
+  initAuth();
+
+  // Check if user is already authenticated
+  const token = getAuthToken();
+  const userStr = localStorage.getItem(STORAGE_USER_KEY);
+  
+  if (token && userStr) {
+    try {
+      currentUser = JSON.parse(userStr);
+      authToken = token;
+      const loaded = await loadUserData();
+      if (loaded) {
+        hideAuthScreen();
+        initWeeklyScheduleInputs();
+        initWeekendScheduleInputs();
+        initDeadlineTimeOptions();
+        initProfileInteractions();
+        initTaskForm();
+        initWizardButtons();
+        initChatbot();
+        initCalendarViewToggle();
+        initGoals();
+        initPomodoroTimer();
+        restoreFromState();
+      } else {
+        showAuthScreen();
+      }
+    } catch (err) {
+      console.error("Error initializing:", err);
+      showAuthScreen();
+    }
+  } else {
+    showAuthScreen();
+  }
 });
 
 function initWeeklyScheduleInputs() {
@@ -434,9 +1086,10 @@ function initDeadlineTimeOptions() {
 }
 
 function initProfileInteractions() {
-  // Procrastinator yes/no buttons
+  // Procrastinator yes/no buttons - remove existing listeners by cloning
   const procrastGroup = $("#is_procrastinator_group");
-  if (procrastGroup) {
+  if (procrastGroup && !procrastGroup.dataset.initialized) {
+    procrastGroup.dataset.initialized = "true";
     procrastGroup.addEventListener("click", (e) => {
       if (e.target.tagName !== "BUTTON") return;
       const val = e.target.dataset.value;
@@ -455,26 +1108,122 @@ function initProfileInteractions() {
 
   buttonGroups.forEach((selector) => {
     const group = $(selector);
-    if (!group) return;
+    if (!group || group.dataset.initialized) return;
+    group.dataset.initialized = "true";
     group.addEventListener("click", (e) => {
       if (e.target.tagName !== "BUTTON") return;
       const hidden = group.querySelector("input[type=hidden]");
-      hidden.value = e.target.dataset.value;
+      if (hidden) {
+        hidden.value = e.target.dataset.value;
+      }
       group
         .querySelectorAll("button")
         .forEach((btn) => btn.classList.toggle("selected", btn === e.target));
     });
   });
 
+  // Save profile button - ensure it's enabled and has event listener
   const saveProfileBtn = $("#saveProfileBtn");
-  saveProfileBtn?.addEventListener("click", () => {
-    const profile = readProfileFromForm();
-    if (!profile) return;
-    state.profile = profile;
-    saveState();
-    showToast("Profile saved.");
-    setStep(2);
+  if (saveProfileBtn) {
+    // Ensure button is enabled
+    saveProfileBtn.disabled = false;
+    saveProfileBtn.removeAttribute("disabled");
+    
+    // Remove old listener if exists (clone to remove all listeners)
+    const newBtn = saveProfileBtn.cloneNode(true);
+    saveProfileBtn.parentNode?.replaceChild(newBtn, saveProfileBtn);
+    
+    // Attach fresh event listener
+    newBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const profile = readProfileFromForm();
+      if (!profile) return;
+      state.profile = profile;
+      // Read goals from onboarding form
+      readGoalsFromOnboardingForm();
+      
+      // Set first reflection due date for new users (7 days from now)
+      if (!state.firstReflectionDueDate) {
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 7);
+        state.firstReflectionDueDate = dueDate.toISOString();
+      }
+      
+      saveUserData();
+      showToast("Profile saved.");
+      // Clear personalization-only mode to allow navigation to goal canvas
+      onboardingMode = null;
+      applyOnboardingModeUI();
+      // Go to goal canvas after profile is saved
+      setStep(2);
+      // Initialize canvas after a brief delay to ensure DOM is ready
+      setTimeout(() => {
+        initGoalCanvas();
+      }, 100);
+    });
+  }
+}
+
+function initOnboardingGoals() {
+  const container = $("#onboardingGoalsHierarchy");
+  if (!container) return;
+  
+  // Render goals hierarchy similar to settings, but for onboarding
+  const levels = ["lifetime", "yearly", "monthly", "weekly", "daily"];
+  container.innerHTML = "";
+  
+  levels.forEach((level) => {
+    const levelGoals = (state.goals || []).filter((g) => g.level === level);
+    const section = document.createElement("div");
+    section.className = "goals-hierarchy-level";
+    section.innerHTML = `
+      <h4>${level.charAt(0).toUpperCase() + level.slice(1)} Goals</h4>
+      <div class="goals-hierarchy-list" data-level="${level}">
+        ${levelGoals.length === 0 ? '<p class="goals-empty-hint">No goals yet</p>' : ""}
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" data-add-goal-level="${level}">Add ${level} goal</button>
+    `;
+    container.appendChild(section);
+    
+    levelGoals.forEach((goal) => {
+      const goalEl = document.createElement("div");
+      goalEl.className = "goals-hierarchy-item";
+      goalEl.innerHTML = `
+        <span style="color: ${goal.color?.text || '#000'}">${goal.name}</span>
+        <button type="button" class="btn-icon-sm" data-delete-goal="${goal.id}">×</button>
+      `;
+      section.querySelector(`[data-level="${level}"]`).appendChild(goalEl);
+    });
   });
+  
+  // Add goal handlers
+  container.onclick = (e) => {
+    const addBtn = e.target.closest("[data-add-goal-level]");
+    if (addBtn) {
+      const level = addBtn.dataset.addGoalLevel;
+      getGoalNameSuggestion(level).then((suggestion) => {
+        const name = prompt(`Enter ${level} goal name:`, suggestion || "");
+        if (name && name.trim()) {
+          addGoal(name.trim(), level);
+          initOnboardingGoals(); // Re-render
+        }
+      });
+      return;
+    }
+    
+    const deleteBtn = e.target.closest("[data-delete-goal]");
+    if (deleteBtn) {
+      const goalId = deleteBtn.dataset.deleteGoal;
+      deleteGoal(goalId);
+      initOnboardingGoals(); // Re-render
+    }
+  };
+}
+
+function readGoalsFromOnboardingForm() {
+  // Goals are already in state.goals from addGoal() calls
+  // This function is just a placeholder for consistency
+  // The goals are saved when saveUserData() is called
 }
 
 function readProfileFromForm() {
@@ -629,55 +1378,280 @@ function restoreProfileToForm() {
 }
 
 function initTaskForm() {
+  // Remove existing listeners by cloning and replacing elements
   const priorityGroup = $("#task_priority_group");
-  priorityGroup?.addEventListener("click", (e) => {
-    if (e.target.tagName !== "BUTTON") return;
-    const val = e.target.dataset.value;
-    $("#task_priority").value = val;
-    priorityGroup
-      .querySelectorAll("button")
-      .forEach((btn) => btn.classList.toggle("selected", btn === e.target));
-  });
+  if (priorityGroup) {
+    const newPriorityGroup = priorityGroup.cloneNode(true);
+    priorityGroup.parentNode?.replaceChild(newPriorityGroup, priorityGroup);
+    newPriorityGroup.addEventListener("click", (e) => {
+      if (e.target.tagName !== "BUTTON") return;
+      const val = e.target.dataset.value;
+      $("#task_priority").value = val;
+      newPriorityGroup
+        .querySelectorAll("button")
+        .forEach((btn) => btn.classList.toggle("selected", btn === e.target));
+    });
+  }
 
   const taskForm = $("#taskForm");
-  taskForm?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const task = readTaskFromForm();
+  if (taskForm) {
+    const newTaskForm = taskForm.cloneNode(true);
+    taskForm.parentNode?.replaceChild(newTaskForm, taskForm);
+    newTaskForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const task = readTaskFromForm();
+      if (!task) return;
+
+      if (editingTaskId) {
+        // Update existing task
+        const idx = state.tasks.findIndex((t) => t.id === editingTaskId);
+        if (idx !== -1) {
+          state.tasks[idx] = { ...state.tasks[idx], ...task, id: editingTaskId };
+        }
+        editingTaskId = null;
+        const submitBtn = newTaskForm.querySelector("button[type=submit]");
+        if (submitBtn) submitBtn.textContent = "Add task to list";
+      } else {
+        // Create new task
+        const newTask = {
+          ...task,
+          id: `task_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          completed: false,
+        };
+        state.tasks.push(newTask);
+      }
+
+      saveUserData();
+      renderTasks();
+      renderTaskSummary();
+      newTaskForm.reset();
+      $("#task_priority").value = "";
+      // Query by ID again since priorityGroup was replaced
+      $("#task_priority_group")?.querySelectorAll("button").forEach((btn) => btn.classList.remove("selected"));
+      $("#planTasksBtn").disabled = state.tasks.length === 0;
+      
+      // Auto-generate schedule after task change
+      if (state.tasks.length > 0 && state.profile) {
+        generateSchedule();
+      }
+    });
+  }
+
+  const planTasksBtn = $("#planTasksBtn");
+  if (planTasksBtn) {
+    const newPlanBtn = planTasksBtn.cloneNode(true);
+    planTasksBtn.parentNode?.replaceChild(newPlanBtn, planTasksBtn);
+    newPlanBtn.addEventListener("click", () => {
+      if (onboardingMode === "personalization-only") {
+        return; // Block navigation to task/confirm steps during signup personalization
+      }
+      rankTasks();
+      renderRankedPreview();
+      setStep(3);
+    });
+  }
+
+  // Initialize task editor modal
+  initTaskEditorModal();
+}
+
+function initTaskEditorModal() {
+  // Initialize deadline time options for modal
+  const modalDeadlineTime = $("#taskEditor_deadline_time");
+  if (modalDeadlineTime) {
+    modalDeadlineTime.innerHTML = "";
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = value;
+        modalDeadlineTime.appendChild(opt);
+      }
+    }
+    modalDeadlineTime.value = "23:59";
+  }
+
+  // Add Task button handler
+  const addTaskBtn = $("#addTaskBtn");
+  if (addTaskBtn) {
+    const newAddTaskBtn = addTaskBtn.cloneNode(true);
+    addTaskBtn.parentNode?.replaceChild(newAddTaskBtn, addTaskBtn);
+    newAddTaskBtn.addEventListener("click", () => {
+      openTaskEditor();
+    });
+  }
+
+  // Close modal handlers
+  const closeBtn = $("#closeTaskEditorBtn");
+  const cancelBtn = $("#cancelTaskEditorBtn");
+  const modal = $("#taskEditorModal");
+  const overlay = modal?.querySelector(".modal-overlay");
+
+  if (closeBtn) {
+    const newCloseBtn = closeBtn.cloneNode(true);
+    closeBtn.parentNode?.replaceChild(newCloseBtn, closeBtn);
+    newCloseBtn.addEventListener("click", closeTaskEditor);
+  }
+
+  if (cancelBtn) {
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode?.replaceChild(newCancelBtn, cancelBtn);
+    newCancelBtn.addEventListener("click", closeTaskEditor);
+  }
+
+  if (overlay) {
+    overlay.addEventListener("click", closeTaskEditor);
+  }
+
+  // Form submission handler and priority button delegation
+  const taskEditorForm = $("#taskEditorForm");
+  if (taskEditorForm) {
+    const newForm = taskEditorForm.cloneNode(true);
+    taskEditorForm.parentNode?.replaceChild(newForm, taskEditorForm);
+    
+    // Use event delegation for priority buttons (works even after form is cloned)
+    newForm.addEventListener("click", (e) => {
+      // Check if clicked element is a priority button
+      const priorityBtn = e.target.closest("#taskEditor_priority_group button");
+      if (priorityBtn) {
+        e.preventDefault();
+        const val = priorityBtn.dataset.value;
+        const hiddenInput = $("#taskEditor_priority");
+        if (hiddenInput) {
+          hiddenInput.value = val;
+        }
+        // Update button selected states
+        const priorityGroup = $("#taskEditor_priority_group");
+        if (priorityGroup) {
+          priorityGroup
+            .querySelectorAll("button")
+            .forEach((btn) => btn.classList.toggle("selected", btn === priorityBtn));
+        }
+      }
+    });
+    
+    newForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const task = readTaskFromEditorForm();
+      if (!task) return;
+
+      if (editingTaskId) {
+        // Update existing task
+        const idx = state.tasks.findIndex((t) => t.id === editingTaskId);
+        if (idx !== -1) {
+          state.tasks[idx] = { ...state.tasks[idx], ...task, id: editingTaskId };
+        }
+        editingTaskId = null;
+      } else {
+        // Create new task
+        const newTask = {
+          ...task,
+          id: `task_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          completed: false,
+        };
+        state.tasks.push(newTask);
+      }
+
+      saveUserData();
+      renderTasks();
+      renderTaskSummary();
+      closeTaskEditor();
+      
+      // Auto-generate schedule after task change
+      if (state.tasks.length > 0 && state.profile) {
+        generateSchedule();
+      } else {
+        // Clear schedule if no tasks
+        state.schedule = [];
+        renderSchedule();
+      }
+      
+      // Auto-generate schedule after task change
+      if (state.tasks.length > 0 && state.profile) {
+        generateSchedule();
+      }
+    });
+  }
+}
+
+function openTaskEditor(taskId = null) {
+  editingTaskId = taskId;
+  const modal = $("#taskEditorModal");
+  const form = $("#taskEditorForm");
+  const title = $("#taskEditorTitle");
+
+  if (!modal || !form) return;
+
+  if (taskId) {
+    // Editing existing task
+    const task = state.tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    if (editingTaskId) {
-      // Update existing task
-      const idx = state.tasks.findIndex((t) => t.id === editingTaskId);
-      if (idx !== -1) {
-        state.tasks[idx] = { ...state.tasks[idx], ...task, id: editingTaskId };
-      }
-      editingTaskId = null;
-      const submitBtn = taskForm.querySelector("button[type=submit]");
-      if (submitBtn) submitBtn.textContent = "Add task to list";
-    } else {
-      // Create new task
-      const newTask = {
-        ...task,
-        id: `task_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        completed: false,
-      };
-      state.tasks.push(newTask);
-    }
+    $("#taskEditor_name").value = task.task_name || "";
+    $("#taskEditor_deadline").value = task.task_deadline || "";
+    $("#taskEditor_deadline_time").value = task.task_deadline_time || "23:59";
+    $("#taskEditor_duration").value = task.task_duration_hours || "";
+    $("#taskEditor_computer_required").checked = !!task.computer_required;
+    $("#taskEditor_priority").value = task.task_priority || "";
+    $("#taskEditor_category").value = task.task_category || "study";
 
-    saveState();
-    renderTasks();
-    renderTaskSummary();
-    taskForm.reset();
-    $("#task_priority").value = "";
-    priorityGroup?.querySelectorAll("button").forEach((btn) => btn.classList.remove("selected"));
-    $("#planTasksBtn").disabled = state.tasks.length === 0;
-  });
+    // Highlight priority button
+    const priorityGroup = $("#taskEditor_priority_group");
+    priorityGroup
+      ?.querySelectorAll("button")
+      .forEach((btn) => btn.classList.toggle("selected", btn.dataset.value === task.task_priority));
 
-  $("#planTasksBtn")?.addEventListener("click", () => {
-    rankTasks();
-    renderRankedPreview();
-    setStep(3);
-  });
+    if (title) title.textContent = "Edit Task";
+    const submitBtn = form.querySelector("button[type=submit]");
+    if (submitBtn) submitBtn.textContent = "Save Changes";
+  } else {
+    // Adding new task
+    form.reset();
+    $("#taskEditor_priority").value = "";
+    $("#taskEditor_deadline_time").value = "23:59";
+    $("#taskEditor_priority_group")?.querySelectorAll("button").forEach((btn) => btn.classList.remove("selected"));
+
+    if (title) title.textContent = "Add Task";
+    const submitBtn = form.querySelector("button[type=submit]");
+    if (submitBtn) submitBtn.textContent = "Add Task";
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function closeTaskEditor() {
+  const modal = $("#taskEditorModal");
+  if (modal) {
+    modal.classList.add("hidden");
+  }
+  editingTaskId = null;
+}
+
+function readTaskFromEditorForm() {
+  const name = $("#taskEditor_name")?.value.trim();
+  const priority = $("#taskEditor_priority")?.value;
+  const category = $("#taskEditor_category")?.value;
+  const deadlineDate = $("#taskEditor_deadline")?.value;
+  const deadlineTime = $("#taskEditor_deadline_time")?.value || "23:59";
+  const durationHours = parseFloat($("#taskEditor_duration")?.value || "0");
+  const computer_required = $("#taskEditor_computer_required")?.checked;
+
+  if (!name || !priority || !category || !deadlineDate || !durationHours) {
+    alert("Please fill in task name, priority, category, deadline, and duration.");
+    return null;
+  }
+
+  const task = {
+    task_name: name,
+    task_priority: priority,
+    task_category: category,
+    task_deadline: deadlineDate,
+    task_deadline_time: deadlineTime,
+    task_duration_hours: durationHours,
+    computer_required,
+  };
+  return task;
 }
 
 function readTaskFromForm() {
@@ -708,29 +1682,43 @@ function readTaskFromForm() {
 // ---------- Goals Management ----------
 
 function initGoals() {
+  // Goals are now managed in Settings, but allow quick add from dashboard
   const addGoalBtn = $("#addGoalBtn");
   if (addGoalBtn) {
-    addGoalBtn.addEventListener("click", () => {
-      const goalName = prompt("Enter your long-term goal name:");
-      if (goalName && goalName.trim()) {
-        addGoal(goalName.trim());
-      }
+    const newBtn = addGoalBtn.cloneNode(true);
+    addGoalBtn.parentNode?.replaceChild(newBtn, addGoalBtn);
+    newBtn.addEventListener("click", async () => {
+      const levelInput = prompt(
+        'Goal level? Choose: lifetime, yearly, monthly, weekly, daily.\nLeave blank for "lifetime".',
+      );
+      const normalized =
+        (levelInput || "lifetime").trim().toLowerCase() || "lifetime";
+      const allowed = ["lifetime", "yearly", "monthly", "weekly", "daily"];
+      const finalLevel = allowed.includes(normalized) ? normalized : "lifetime";
+
+      const placeholder = await getGoalNameSuggestion(finalLevel);
+      const name = prompt(
+        `Add a ${finalLevel} goal:`,
+        placeholder || "",
+      );
+      if (!name || !name.trim()) return;
+      addGoal(name.trim(), finalLevel);
     });
   }
-  
+
   renderGoals();
   updateCategoryDropdown();
 }
 
-function addGoal(name) {
+function addGoal(name, level = "lifetime") {
   if (!state.goals) {
     state.goals = [];
   }
   
-  // Check if goal already exists
-  const existing = state.goals.find(g => g.name.toLowerCase() === name.toLowerCase());
+  // Check if goal already exists at this level
+  const existing = state.goals.find(g => g.name.toLowerCase() === name.toLowerCase() && g.level === level);
   if (existing) {
-    alert("A goal with this name already exists.");
+    alert("A goal with this name already exists at this level.");
     return;
   }
   
@@ -751,12 +1739,19 @@ function addGoal(name) {
     id: `goal_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     name: name,
     color: color,
+    level: level,
+    parentId: null, // Can be set later for hierarchy
   };
   
   state.goals.push(goal);
-  saveState();
+  saveUserData();
   renderGoals();
   updateCategoryDropdown();
+  
+  // Generate AI breakdown for lifetime and yearly goals
+  if (level === "lifetime" || level === "yearly") {
+    generateGoalBreakdown(goal, { showToUser: true });
+  }
 }
 
 function deleteGoal(goalId) {
@@ -776,7 +1771,7 @@ function deleteGoal(goalId) {
   
   // Remove goal
   state.goals = state.goals.filter(g => g.id !== goalId);
-  saveState();
+  saveUserData();
   renderGoals();
   updateCategoryDropdown();
   renderTasks();
@@ -784,29 +1779,68 @@ function deleteGoal(goalId) {
   renderSchedule();
 }
 
-function renderGoals() {
+async function renderGoals() {
   const container = $("#goalsList");
   if (!container) return;
   
   container.innerHTML = "";
   
   if (!state.goals || state.goals.length === 0) {
-    container.innerHTML = '<div class="goals-empty">No goals yet. Click "+ Add Goal" to create one.</div>';
+    container.innerHTML = '<div class="goals-empty">No goals yet. Add goals in Settings.</div>';
     return;
   }
   
-  state.goals.forEach(goal => {
-    const goalItem = document.createElement("div");
-    goalItem.className = "goal-item";
-    goalItem.style.borderLeftColor = goal.color.border;
-    goalItem.innerHTML = `
-      <span class="goal-name" style="color: ${goal.color.text}">${goal.name}</span>
-      <button type="button" class="goal-delete-btn" data-goal-id="${goal.id}" title="Delete goal">×</button>
-    `;
-    container.appendChild(goalItem);
+  const levels = ["lifetime", "yearly", "monthly", "weekly", "daily"];
+  const levelLabels = {
+    lifetime: "Lifetime",
+    yearly: "Yearly",
+    monthly: "Monthly",
+    weekly: "Weekly",
+    daily: "Daily"
+  };
+  
+  levels.forEach(level => {
+    const levelGoals = state.goals.filter(g => g.level === level);
+    if (levelGoals.length === 0) return;
+    
+    const levelSection = document.createElement("div");
+    levelSection.className = "goals-level-section";
+    
+    const levelHeader = document.createElement("div");
+    levelHeader.className = "goals-level-header";
+    levelHeader.textContent = levelLabels[level];
+    levelSection.appendChild(levelHeader);
+    
+    levelGoals.forEach(goal => {
+      const goalItem = document.createElement("div");
+      goalItem.className = "goal-item";
+      goalItem.style.borderLeftColor = goal.color?.border || goal.color?.text || "#22c55e";
+      
+      const goalContent = document.createElement("div");
+      goalContent.className = "goal-content";
+      
+      const goalName = document.createElement("span");
+      goalName.className = "goal-name";
+      goalName.style.color = goal.color?.text || "#1a1a1a";
+      goalName.textContent = goal.name;
+      goalContent.appendChild(goalName);
+      
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "goal-delete-btn";
+      deleteBtn.dataset.goalId = goal.id;
+      deleteBtn.title = "Delete goal";
+      deleteBtn.textContent = "×";
+      
+      goalItem.appendChild(goalContent);
+      goalItem.appendChild(deleteBtn);
+      levelSection.appendChild(goalItem);
+    });
+    
+    container.appendChild(levelSection);
   });
   
-  // Handle delete button clicks (use onclick to replace handler, not addEventListener to avoid duplicates)
+  // Handle delete button clicks
   container.onclick = (e) => {
     const deleteBtn = e.target.closest(".goal-delete-btn");
     if (deleteBtn) {
@@ -817,6 +1851,70 @@ function renderGoals() {
       e.stopPropagation();
     }
   };
+}
+
+async function generateGoalBreakdown(goal, options = {}) {
+  const { showToUser = false } = options;
+  // Only generate breakdowns for lifetime and yearly goals
+  if (goal.level !== "lifetime" && goal.level !== "yearly") {
+    return;
+  }
+  
+  // Check if we already have a breakdown
+  if (goal.aiBreakdown) {
+    return;
+  }
+  
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: `Break down this ${goal.level} goal into smaller actionable steps. For example, if the goal is "read 50 books per year", suggest: "~4 books per month, ~1 book per week, ~20-30 pages per day". Keep it concise (one line, 2-3 breakdowns max).\n\nGoal: ${goal.name}`,
+        context: `User profile: ${JSON.stringify(state.profile || {})}`,
+      }),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      const breakdown = data.reply || "";
+      
+      // Update goal with breakdown
+      const goalIndex = state.goals.findIndex(g => g.id === goal.id);
+      if (goalIndex !== -1) {
+        state.goals[goalIndex].aiBreakdown = breakdown;
+        saveUserData();
+        // Optionally show to user during add flow
+        if (showToUser && breakdown) {
+          alert(`AI suggestion:\n${breakdown}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error generating goal breakdown:", err);
+  }
+}
+
+async function getGoalNameSuggestion(level = "lifetime") {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: `Suggest a concise ${level} goal the user could set. Just return the goal text, no quotes, under 60 characters.`,
+        context: `Level: ${level}`,
+      }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    if (typeof data.reply === "string") {
+      return data.reply.trim();
+    }
+    return "";
+  } catch (err) {
+    console.error("Error getting goal suggestion:", err);
+    return "";
+  }
 }
 
 function updateCategoryDropdown() {
@@ -882,6 +1980,1004 @@ function getCategoryInfo(categoryValue) {
   };
 }
 
+// ---------- Goal Canvas System ----------
+
+let goalCanvasNodes = []; // Array of {id, text, level, x, y, parentId, isGhost}
+let selectedNodeId = null;
+// Removed draggingNodeId and dragOffset - no longer needed with list structure
+
+const GOAL_LEVELS = ["lifetime", "yearly", "seasonal", "monthly", "weekly", "daily"];
+const LEVEL_LABELS = {
+  lifetime: "Lifetime",
+  yearly: "Yearly",
+  seasonal: "Seasonal",
+  monthly: "Monthly",
+  weekly: "Weekly",
+  daily: "Daily"
+};
+
+function initGoalCanvas() {
+  const canvas = $("#goalCanvas");
+  if (!canvas) {
+    console.error("Goal canvas element not found");
+    return;
+  }
+  
+  // Ensure canvas is visible
+  const step2 = document.querySelector(".wizard-step[data-step='2']");
+  if (step2 && !step2.classList.contains("active")) {
+    console.error("Goal canvas step is not active");
+    return;
+  }
+  
+  // Initialize canvas with sections
+  renderGoalCanvas();
+  
+  // Approve all ghosts button - ensure it exists and has event listener
+  let approveAllBtn = $("#approveAllGhostsBtn");
+  if (!approveAllBtn) {
+    // Create button if it doesn't exist
+    approveAllBtn = document.createElement("button");
+    approveAllBtn.id = "approveAllGhostsBtn";
+    approveAllBtn.className = "btn-approve-all-ghosts hidden";
+    approveAllBtn.textContent = "Approve All AI Suggestions";
+    canvas.appendChild(approveAllBtn);
+  }
+  
+  // Remove old listeners and add fresh one
+  const newBtn = approveAllBtn.cloneNode(true);
+  approveAllBtn.parentNode?.replaceChild(newBtn, approveAllBtn);
+  newBtn.addEventListener("click", () => {
+    approveAllGhostNodes();
+  });
+  
+  // Load existing goals into canvas nodes
+  if (state.goals && state.goals.length > 0) {
+    goalCanvasNodes = state.goals.map(goal => ({
+      id: goal.id,
+      text: goal.name,
+      level: goal.level || "lifetime",
+      x: goal.canvasX || 50,
+      y: goal.canvasY || 50,
+      parentId: goal.parentId || null,
+      isGhost: false
+    }));
+    renderGoalNodes();
+    updateApproveAllButton(); // Show button if ghost nodes exist
+    
+    // Sync daily goals to tasks on load
+    syncDailyGoalsToTasks();
+  }
+  
+  // Canvas click handling removed - nodes are added via + Add buttons in list headers
+  
+  // Tab key to approve ghost nodes (only when editor is open and node is ghost)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Tab" && selectedNodeId) {
+      const node = goalCanvasNodes.find(n => n.id === selectedNodeId);
+      if (node && node.isGhost) {
+        e.preventDefault();
+        approveGhostNode(selectedNodeId);
+      }
+    }
+  });
+  
+  // Goal editor handlers
+  const saveGoalBtn = $("#saveGoalBtn");
+  const confirmGhostBtn = $("#confirmGhostBtn");
+  const deleteGoalBtn = $("#deleteGoalBtn");
+  const goalEditorText = $("#goalEditorText");
+  
+  if (saveGoalBtn) {
+    saveGoalBtn.addEventListener("click", () => {
+      if (selectedNodeId) {
+        const node = goalCanvasNodes.find(n => n.id === selectedNodeId);
+        if (node && goalEditorText) {
+          // Don't allow saving ghost nodes - they must be confirmed first
+          if (node.isGhost) {
+            alert("Please click 'Confirm Suggestion' to approve this AI suggestion, or edit it first.");
+            return;
+          }
+          
+          const oldText = node.text;
+          node.text = goalEditorText.value.trim();
+          node.isGhost = false;
+          renderGoalNodes();
+          saveGoalCanvas();
+          
+          // Generate AI suggestions if text changed and is meaningful
+          if (node.text && node.text !== "New Goal" && node.text !== oldText) {
+            // Auto-generate suggestions for all nodes in this level
+            autoGenerateNextLevelSuggestions(node.level);
+          }
+        }
+      }
+      hideGoalEditor();
+    });
+  }
+  
+  if (confirmGhostBtn) {
+    confirmGhostBtn.addEventListener("click", () => {
+      if (selectedNodeId) {
+        approveGhostNode(selectedNodeId);
+      }
+    });
+  }
+  
+  if (deleteGoalBtn) {
+    deleteGoalBtn.addEventListener("click", () => {
+      if (selectedNodeId) {
+        deleteGoalNode(selectedNodeId);
+      }
+    });
+  }
+  
+  // Finish goals button
+  const finishGoalsBtn = $("#finishGoalsBtn");
+  if (finishGoalsBtn) {
+    finishGoalsBtn.addEventListener("click", () => {
+      // Goals are already saved automatically via saveGoalCanvas()
+      // Just finish onboarding
+      onboardingMode = null;
+      shouldShowOnboarding = false;
+      applyOnboardingModeUI();
+      setStep(null);
+      restoreFromState();
+      startReflectionChecker();
+    });
+  }
+  
+  // Back button
+  const backToProfileBtn = $("#backToProfileBtn");
+  if (backToProfileBtn) {
+    backToProfileBtn.addEventListener("click", () => {
+      setStep(1);
+    });
+  }
+}
+
+// User's chosen long-term goal timeframe
+let userLongTermTimeframe = "lifetime"; // Default, can be changed by user
+
+function renderGoalCanvas() {
+  const canvas = $("#goalCanvas");
+  if (!canvas) {
+    console.error("Canvas element not found in renderGoalCanvas");
+    return;
+  }
+  
+  // Save the approve all button before clearing
+  const approveAllBtn = $("#approveAllGhostsBtn");
+  
+  canvas.innerHTML = "";
+  
+  // Create minimalist timeframe selector
+  const timeframeSelector = document.createElement("div");
+  timeframeSelector.className = "goal-timeframe-selector";
+  timeframeSelector.innerHTML = `
+    <select id="longTermTimeframeSelect">
+      <option value="lifetime" ${userLongTermTimeframe === "lifetime" ? "selected" : ""}>Lifetime</option>
+      <option value="yearly" ${userLongTermTimeframe === "yearly" ? "selected" : ""}>Yearly</option>
+      <option value="seasonal" ${userLongTermTimeframe === "seasonal" ? "selected" : ""}>Seasonal</option>
+      <option value="monthly" ${userLongTermTimeframe === "monthly" ? "selected" : ""}>Monthly</option>
+    </select>
+    <button id="addLongTermGoalBtn" class="btn-add-goal">+ Add</button>
+  `;
+  canvas.appendChild(timeframeSelector);
+  
+  // Handle timeframe change
+  const select = timeframeSelector.querySelector("#longTermTimeframeSelect");
+  select.addEventListener("change", (e) => {
+    userLongTermTimeframe = e.target.value;
+    renderGoalNodes();
+  });
+  
+  // Handle add goal button
+  const addBtn = timeframeSelector.querySelector("#addLongTermGoalBtn");
+  addBtn.addEventListener("click", () => {
+    createGoalNode(userLongTermTimeframe, 0, 0);
+  });
+  
+  // Create single list container
+  const listContainer = document.createElement("ul");
+  listContainer.className = "goal-list-main";
+  listContainer.id = "goalListMain";
+  canvas.appendChild(listContainer);
+  
+  // Re-add the approve all button if it existed
+  if (approveAllBtn) {
+    canvas.appendChild(approveAllBtn);
+  } else {
+    // Create the button if it doesn't exist
+    const newBtn = document.createElement("button");
+    newBtn.id = "approveAllGhostsBtn";
+    newBtn.className = "btn-approve-all-ghosts hidden";
+    newBtn.textContent = "Approve All AI Suggestions";
+    newBtn.addEventListener("click", () => {
+      approveAllGhostNodes();
+    });
+    canvas.appendChild(newBtn);
+  }
+  
+  console.log("Goal canvas rendered with single list structure");
+}
+
+function renderGoalNodes() {
+  const canvas = $("#goalCanvas");
+  if (!canvas) return;
+  
+  const listContainer = canvas.querySelector("#goalListMain");
+  if (!listContainer) return;
+  
+  // Clear all list items
+  listContainer.innerHTML = "";
+  
+  // Get all top-level goals (goals with no parent, matching user's long-term timeframe)
+  const topLevelGoals = goalCanvasNodes.filter(n => 
+    !n.parentId && n.level === userLongTermTimeframe
+  );
+  
+  // Render each top-level goal and its children recursively
+  topLevelGoals.forEach(goal => {
+    const listItem = createListItemElement(goal);
+    listContainer.appendChild(listItem);
+    
+    // Recursively add children
+    addChildrenToList(listItem, goal.id);
+  });
+  
+  // Show/hide "Approve All" button based on whether there are ghost nodes
+  updateApproveAllButton();
+}
+
+function addChildrenToList(parentElement, parentId) {
+  const children = goalCanvasNodes.filter(n => n.parentId === parentId);
+  if (children.length === 0) return;
+  
+  const childrenList = document.createElement("ul");
+  childrenList.className = "goal-list-children";
+  // Start expanded by default (not collapsed)
+  
+  children.forEach(child => {
+    const childItem = createListItemElement(child);
+    childrenList.appendChild(childItem);
+    
+    // Recursively add grandchildren
+    addChildrenToList(childItem, child.id);
+  });
+  
+  parentElement.appendChild(childrenList);
+  
+  // Update the toggle arrow to show expanded state (▼)
+  const toggle = parentElement.querySelector(".goal-list-toggle");
+  if (toggle) {
+    toggle.textContent = "▼";
+  }
+}
+
+function createListItemElement(node) {
+  const item = document.createElement("li");
+  item.className = "goal-list-item";
+  item.classList.add(`goal-level-${node.level}`); // Add level class for color coding
+  if (node.isGhost) {
+    item.classList.add("ghost");
+  }
+  if (selectedNodeId === node.id) {
+    item.classList.add("selected");
+  }
+  item.dataset.nodeId = node.id;
+  item.dataset.level = node.level;
+  
+  // Check if this node has children
+  const hasChildren = goalCanvasNodes.some(n => n.parentId === node.id);
+  
+  const content = document.createElement("div");
+  content.className = "goal-list-item-content";
+  
+  // Collapse/expand toggle (only if has children)
+  if (hasChildren) {
+    const toggle = document.createElement("span");
+    toggle.className = "goal-list-toggle";
+    toggle.textContent = "▼"; // Start expanded
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // Find the children list - it might be added after this item
+      const childrenList = item.querySelector(".goal-list-children");
+      if (childrenList) {
+        const isCollapsed = childrenList.classList.contains("collapsed");
+        if (isCollapsed) {
+          childrenList.classList.remove("collapsed");
+          toggle.textContent = "▼";
+        } else {
+          childrenList.classList.add("collapsed");
+          toggle.textContent = "▶";
+        }
+      }
+    });
+    content.appendChild(toggle);
+  } else {
+    // Empty spacer if no children
+    const spacer = document.createElement("span");
+    spacer.className = "goal-list-toggle-spacer";
+    content.appendChild(spacer);
+  }
+  
+  // Minimalist color tag (just a small dot)
+  const tag = document.createElement("span");
+  tag.className = "goal-timeframe-tag";
+  tag.title = `${LEVEL_LABELS[node.level] || node.level}`;
+  content.appendChild(tag);
+  
+  const text = document.createElement("span");
+  text.className = "goal-list-item-text";
+  text.textContent = node.text || "New Goal";
+  content.appendChild(text);
+  
+  const actions = document.createElement("div");
+  actions.className = "goal-list-item-actions";
+  
+  if (node.isGhost) {
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "btn-icon-sm btn-confirm-ghost";
+    confirmBtn.textContent = "✓";
+    confirmBtn.title = "Confirm suggestion";
+    confirmBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      approveGhostNode(node.id);
+    });
+    actions.appendChild(confirmBtn);
+  }
+  
+  const editBtn = document.createElement("button");
+  editBtn.className = "btn-icon-sm btn-edit-goal";
+  editBtn.textContent = "✎";
+  editBtn.title = "Edit";
+  editBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    selectGoalNode(node.id);
+  });
+  actions.appendChild(editBtn);
+  
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn-icon-sm btn-delete-goal";
+  deleteBtn.textContent = "×";
+  deleteBtn.title = "Delete";
+  deleteBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteGoalNode(node.id);
+  });
+  actions.appendChild(deleteBtn);
+  
+  content.appendChild(actions);
+  item.appendChild(content);
+  
+  return item;
+}
+
+function updateApproveAllButton() {
+  const approveAllBtn = $("#approveAllGhostsBtn");
+  if (!approveAllBtn) return;
+  
+  const hasGhostNodes = goalCanvasNodes.some(n => n.isGhost);
+  if (hasGhostNodes) {
+    approveAllBtn.classList.remove("hidden");
+  } else {
+    approveAllBtn.classList.add("hidden");
+  }
+}
+
+function approveAllGhostNodes() {
+  const ghostNodes = goalCanvasNodes.filter(n => n.isGhost);
+  
+  if (ghostNodes.length === 0) {
+    return;
+  }
+  
+  // Approve each ghost node
+  ghostNodes.forEach(ghostNode => {
+    ghostNode.isGhost = false;
+    ghostNode.id = `goal_node_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  });
+  
+  // Remove duplicates (keep only the approved versions)
+  const approvedIds = new Set(ghostNodes.map(n => n.id));
+  goalCanvasNodes = goalCanvasNodes.filter(n => 
+    !n.isGhost || approvedIds.has(n.id)
+  );
+  
+  // Re-render to show approved nodes
+  renderGoalNodes();
+  saveGoalCanvas();
+  
+  // Hide the approve all button since no ghosts remain
+  updateApproveAllButton();
+  
+  // Auto-generate suggestions for the next level for all approved nodes
+  const approvedLevels = new Set(ghostNodes.map(n => n.level));
+  approvedLevels.forEach(level => {
+    autoGenerateNextLevelSuggestions(level);
+  });
+  
+  console.log(`Approved ${ghostNodes.length} AI suggestions`);
+}
+
+// Removed old node-based functions: cleanupOrphanedLines, drawConnectionLine, createNodeElement
+// Now using list-based structure
+
+function createGoalNode(level, x, y) {
+  const nodeId = `goal_node_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const newNode = {
+    id: nodeId,
+    text: "New Goal",
+    level: level,
+    x: x,
+    y: y,
+    parentId: null,
+    isGhost: false
+  };
+  
+  goalCanvasNodes.push(newNode);
+  renderGoalNodes();
+  selectGoalNode(nodeId);
+  
+  // Don't generate suggestions yet - wait until user edits the node
+}
+
+// Auto-generate suggestions for all nodes in a given level
+async function autoGenerateNextLevelSuggestions(parentLevel) {
+  const currentIndex = GOAL_LEVELS.indexOf(parentLevel);
+  if (currentIndex >= GOAL_LEVELS.length - 1) return; // No child level available
+  
+  const childLevel = GOAL_LEVELS[currentIndex + 1];
+  
+  // Get all non-ghost nodes in the parent level
+  const parentNodes = goalCanvasNodes.filter(n => 
+    n.level === parentLevel && 
+    !n.isGhost && 
+    n.text && 
+    n.text.trim() !== "" && 
+    n.text !== "New Goal"
+  );
+  
+  if (parentNodes.length === 0) return;
+  
+  console.log(`Auto-generating ${childLevel} suggestions for ${parentNodes.length} ${parentLevel} goals`);
+  
+  // Remove existing ghost nodes for the child level
+  goalCanvasNodes = goalCanvasNodes.filter(n => 
+    !(n.isGhost && n.level === childLevel)
+  );
+  
+  // Generate suggestions for each parent node
+  for (const parentNode of parentNodes) {
+    await generateGoalSuggestions(parentNode.id, parentLevel);
+    // Small delay to avoid overwhelming the API
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  renderGoalNodes();
+  updateApproveAllButton();
+}
+
+async function generateGoalSuggestions(parentNodeId, parentLevel) {
+  const parentNode = goalCanvasNodes.find(n => n.id === parentNodeId);
+  if (!parentNode) {
+    console.error("Parent node not found for suggestions");
+    return;
+  }
+  
+  if (!parentNode.text || parentNode.text.trim() === "" || parentNode.text === "New Goal") {
+    console.log("Skipping suggestions - parent node has no meaningful text");
+    return;
+  }
+  
+  // Determine child level
+  const currentIndex = GOAL_LEVELS.indexOf(parentLevel);
+  if (currentIndex >= GOAL_LEVELS.length - 1) return; // No child level available
+  
+  const childLevel = GOAL_LEVELS[currentIndex + 1];
+  
+  // Show loading spinner
+  const canvas = $("#goalCanvas");
+  if (canvas) {
+    const levelIndex = GOAL_LEVELS.indexOf(childLevel);
+    const section = canvas.children[levelIndex];
+    if (section) {
+      // Remove existing spinner
+      section.querySelectorAll(".goal-loading-spinner").forEach(spinner => spinner.remove());
+      
+      const spinner = document.createElement("div");
+      spinner.className = "goal-loading-spinner";
+      section.appendChild(spinner);
+    }
+  }
+  
+  // Create level-specific instructions with clear timeframes
+  const timeframeContext = {
+    lifetime: "Lifetime goals span decades - these are your ultimate life aspirations.",
+    yearly: "Yearly goals are accomplished within ONE CALENDAR YEAR (12 months). Think: 'What can I achieve in 2024?' or 'What milestone can I reach by December 31st?'",
+    seasonal: "Seasonal goals are accomplished within ONE QUARTER (3 months). Think: 'What can I achieve in Q1 (Jan-Mar)?' or 'What can I complete in this 3-month period?'",
+    monthly: "Monthly goals are accomplished within ONE MONTH (30 days). Think: 'What can I achieve in January?' or 'What can I complete in the next 30 days?'",
+    weekly: "Weekly goals are accomplished within ONE WEEK (7 days). Think: 'What can I achieve this week?' or 'What tasks can I complete from Monday to Sunday?'",
+    daily: "Daily goals are accomplished within ONE DAY (24 hours). Think: 'What can I achieve today?' or 'What specific task can I complete today?'"
+  };
+  
+  const parentTimeframe = timeframeContext[parentLevel] || "";
+  const childTimeframe = timeframeContext[childLevel] || "";
+  
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: `Break down this ${parentLevel} goal into ${childLevel} goals.
+
+TIME CONTEXT:
+${parentTimeframe}
+${childTimeframe}
+
+The parent goal "${parentNode.text}" is a ${parentLevel} goal. You need to suggest 1-2 ${childLevel} goals that:
+1. Can be accomplished within the ${childLevel} timeframe (${childLevel === 'yearly' ? '12 months' : childLevel === 'seasonal' ? '3 months' : childLevel === 'monthly' ? '30 days' : childLevel === 'weekly' ? '7 days' : '1 day'})
+2. Are concrete steps toward the parent ${parentLevel} goal
+3. Are realistic for the timeframe (don't suggest too much)
+4. Are concise (2-5 words each)
+
+IMPORTANT: Only suggest 1-2 goals maximum. Focus on quality over quantity. Each suggestion must be achievable within the ${childLevel} timeframe.
+
+Return ONLY the ${childLevel} goal suggestions, one per line, without numbers, bullets, or formatting.`,
+        context: `User profile: ${JSON.stringify(state.profile || {})}. Goal hierarchy: ${parentLevel} → ${childLevel}. Timeframe: ${childLevel === 'yearly' ? '12 months' : childLevel === 'seasonal' ? '3 months' : childLevel === 'monthly' ? '30 days' : childLevel === 'weekly' ? '7 days' : '1 day'}`,
+      }),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      const replyText = data.reply || "";
+      console.log("AI suggestions received:", replyText);
+      
+      const suggestions = replyText
+        .split("\n")
+        .map(s => s.trim())
+        .filter(s => s && s.length > 0 && !s.match(/^[\d\-\*•]/))
+        .slice(0, 2); // Reduced to 1-2 suggestions
+      
+      console.log("Parsed suggestions:", suggestions);
+      
+      if (suggestions.length === 0) {
+        console.warn("No valid suggestions parsed from AI response");
+        return;
+      }
+      
+      // Remove any existing ghost nodes for this parent
+      goalCanvasNodes = goalCanvasNodes.filter(n => 
+        !(n.isGhost && n.parentId === parentNodeId)
+      );
+      
+      // Create ghost nodes for suggestions
+      suggestions.forEach((suggestion, index) => {
+        const ghostNode = {
+          id: `ghost_${parentNodeId}_${index}`,
+          text: suggestion,
+          level: childLevel,
+          x: 0, // Will be centered by render function
+          y: 0, // Will be positioned by render function
+          parentId: parentNodeId,
+          isGhost: true
+        };
+        goalCanvasNodes.push(ghostNode);
+        console.log("Created ghost node:", ghostNode);
+      });
+      
+      renderGoalNodes();
+      updateApproveAllButton(); // Show button if ghost nodes exist
+      console.log("Ghost nodes rendered, total nodes:", goalCanvasNodes.length);
+    } else {
+      console.error("AI API error:", res.status, await res.text());
+    }
+  } catch (err) {
+    console.error("Error generating goal suggestions:", err);
+  } finally {
+    // Remove loading spinner
+    if (canvas) {
+      const parentItem = canvas.querySelector(`[data-node-id="${parentNodeId}"]`);
+      if (parentItem) {
+        parentItem.querySelectorAll(".goal-loading-spinner").forEach(spinner => spinner.remove());
+      }
+    }
+  }
+}
+
+function approveGhostNode(nodeId) {
+  const node = goalCanvasNodes.find(n => n.id === nodeId);
+  if (!node || !node.isGhost) return;
+  
+  node.isGhost = false;
+  node.id = `goal_node_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  
+  // Remove other ghost nodes with same parent
+  goalCanvasNodes = goalCanvasNodes.filter(n => 
+    !(n.isGhost && n.parentId === node.parentId) || n.id === node.id
+  );
+  
+  renderGoalNodes();
+  updateApproveAllButton(); // Update button visibility
+  selectGoalNode(node.id);
+  saveGoalCanvas();
+  
+  // Auto-generate suggestions for all nodes in this level
+  autoGenerateNextLevelSuggestions(node.level);
+}
+
+function selectGoalNode(nodeId) {
+  selectedNodeId = nodeId;
+  const node = goalCanvasNodes.find(n => n.id === nodeId);
+  if (node) {
+    showGoalEditor(node);
+  }
+  renderGoalNodes();
+}
+
+function showGoalEditor(node) {
+  const editorPanel = $("#goalEditorPanel");
+  const editorText = $("#goalEditorText");
+  const saveBtn = $("#saveGoalBtn");
+  const confirmBtn = $("#confirmGhostBtn");
+  
+  if (editorPanel && editorText) {
+    editorPanel.classList.remove("hidden");
+    editorText.value = node.text;
+    
+    // Show/hide buttons based on whether node is a ghost
+    if (node.isGhost) {
+      // Ghost node: show confirm button, hide save button
+      if (confirmBtn) {
+        confirmBtn.classList.remove("hidden");
+      }
+      if (saveBtn) {
+        saveBtn.classList.add("hidden");
+      }
+      editorText.readOnly = true; // Make read-only for ghost nodes
+    } else {
+      // Regular node: show save button, hide confirm button
+      if (confirmBtn) {
+        confirmBtn.classList.add("hidden");
+      }
+      if (saveBtn) {
+        saveBtn.classList.remove("hidden");
+      }
+      editorText.readOnly = false; // Allow editing for regular nodes
+    }
+    
+    editorText.focus();
+  }
+}
+
+function hideGoalEditor() {
+  const editorPanel = $("#goalEditorPanel");
+  if (editorPanel) {
+    editorPanel.classList.add("hidden");
+  }
+  selectedNodeId = null;
+}
+
+function deleteGoalNode(nodeId) {
+  // Recursively find all children and descendants to delete
+  const toDelete = new Set([nodeId]);
+  
+  const findChildren = (parentId) => {
+    goalCanvasNodes.forEach(node => {
+      if (node.parentId === parentId && !toDelete.has(node.id)) {
+        toDelete.add(node.id);
+        findChildren(node.id); // Recursively find grandchildren
+      }
+    });
+  };
+  
+  // Find all descendants
+  findChildren(nodeId);
+  
+  console.log("Deleting nodes:", Array.from(toDelete));
+  
+  // Remove all nodes (parent and all descendants)
+  goalCanvasNodes = goalCanvasNodes.filter(n => !toDelete.has(n.id));
+  
+  // Clear selection if deleted node was selected
+  if (toDelete.has(selectedNodeId)) {
+    hideGoalEditor();
+  }
+  
+  // Re-render to remove nodes
+  renderGoalNodes();
+  updateApproveAllButton(); // Update button visibility
+  saveGoalCanvas();
+  
+  // Auto-regenerate suggestions for all levels that might have been affected
+  // After deletion, regenerate suggestions for remaining nodes in each level
+  GOAL_LEVELS.forEach(level => {
+    const nodesInLevel = goalCanvasNodes.filter(n => 
+      n.level === level && 
+      !n.isGhost && 
+      n.text && 
+      n.text.trim() !== "" && 
+      n.text !== "New Goal"
+    );
+    if (nodesInLevel.length > 0) {
+      autoGenerateNextLevelSuggestions(level);
+    }
+  });
+  const deletedNode = goalCanvasNodes.find(n => n.id === nodeId);
+  if (deletedNode) {
+    // Actually, the node is already deleted, so we need to check parent level
+    // Instead, regenerate suggestions for all levels that might be affected
+    GOAL_LEVELS.forEach(level => {
+      const nodesInLevel = goalCanvasNodes.filter(n => n.level === level && !n.isGhost);
+      if (nodesInLevel.length > 0) {
+        autoGenerateNextLevelSuggestions(level);
+      }
+    });
+  }
+}
+
+// Removed startDrag - no longer needed with list structure
+
+function saveGoalCanvas() {
+  // Auto-save goals whenever canvas changes
+  state.goals = goalCanvasNodes
+    .filter(n => !n.isGhost)
+    .map(node => ({
+      id: node.id,
+      name: node.text,
+      level: node.level,
+      parentId: node.parentId,
+      canvasX: node.x,
+      canvasY: node.y,
+      color: generateGoalColor(node.level)
+    }));
+  
+  saveUserData();
+  
+  // Sync daily goals to tasks
+  syncDailyGoalsToTasks();
+  
+  // Auto-render calendar if we have tasks
+  if (state.tasks && state.tasks.length > 0 && state.profile) {
+    generateSchedule();
+  }
+}
+
+// Sync daily goals to tasks
+function syncDailyGoalsToTasks() {
+  if (!state.goals) {
+    console.log("No goals found for syncing");
+    return;
+  }
+  
+  // Get all daily goals (including from canvas nodes if not yet saved)
+  let dailyGoals = [];
+  
+  // First check canvas nodes (for goals being edited)
+  if (goalCanvasNodes && goalCanvasNodes.length > 0) {
+    dailyGoals = goalCanvasNodes
+      .filter(n => !n.isGhost && n.level === "daily" && n.text && n.text.trim() !== "" && n.text !== "New Goal")
+      .map(node => ({
+        id: node.id,
+        name: node.text,
+        level: node.level
+      }));
+  }
+  
+  // Also check saved goals
+  const savedDailyGoals = (state.goals || []).filter(g => 
+    g.level === "daily" && g.name && g.name.trim() !== "" && g.name !== "New Goal"
+  );
+  
+  // Merge and deduplicate
+  const allDailyGoals = [...dailyGoals];
+  savedDailyGoals.forEach(goal => {
+    if (!allDailyGoals.find(g => g.id === goal.id)) {
+      allDailyGoals.push(goal);
+    }
+  });
+  
+  console.log("Syncing daily goals to tasks:", allDailyGoals);
+  
+  if (!state.tasks) {
+    state.tasks = [];
+  }
+  
+  // Get existing task IDs that came from daily goals
+  const existingGoalTaskIds = state.tasks
+    .filter(t => t.fromDailyGoal)
+    .map(t => t.goalId);
+  
+  // Create tasks for daily goals that don't have tasks yet
+  allDailyGoals.forEach(goal => {
+    if (!existingGoalTaskIds.includes(goal.id)) {
+      const task = {
+        id: `task_goal_${goal.id}`,
+        name: goal.name,
+        description: `Daily goal: ${goal.name}`,
+        priority: "important-not-urgent",
+        category: goal.name.toLowerCase().replace(/\s+/g, "-"),
+        estimatedHours: 1, // Default 1 hour for daily goals
+        deadline: null,
+        completed: false,
+        fromDailyGoal: true,
+        goalId: goal.id
+      };
+      
+      state.tasks.push(task);
+      console.log("Created task from daily goal:", task);
+    } else {
+      // Update existing task if goal name changed
+      const existingTask = state.tasks.find(t => t.goalId === goal.id);
+      if (existingTask && existingTask.name !== goal.name) {
+        existingTask.name = goal.name;
+        existingTask.description = `Daily goal: ${goal.name}`;
+        existingTask.category = goal.name.toLowerCase().replace(/\s+/g, "-");
+        console.log("Updated task from daily goal:", existingTask);
+      }
+    }
+  });
+  
+  // Remove tasks for goals that no longer exist
+  const dailyGoalIds = new Set(allDailyGoals.map(g => g.id));
+  state.tasks = state.tasks.filter(t => {
+    if (t.fromDailyGoal) {
+      const goalExists = dailyGoalIds.has(t.goalId);
+      if (!goalExists) {
+        // Also remove from schedule
+        if (state.schedule) {
+          state.schedule = state.schedule.filter(s => s.taskId !== t.id);
+        }
+        console.log("Removed task for deleted daily goal:", t.id);
+        return false;
+      }
+    }
+    return true;
+  });
+  
+  saveUserData();
+  renderTasks();
+  renderTaskSummary();
+}
+
+// Manual sync function for the button
+function manualSyncCalendar() {
+  console.log("Manual calendar sync triggered");
+  
+  // First sync daily goals to tasks
+  syncDailyGoalsToTasks();
+  
+  // Then regenerate schedule if we have tasks and profile
+  if (state.tasks && state.tasks.length > 0 && state.profile) {
+    console.log("Regenerating schedule with", state.tasks.length, "tasks");
+    generateSchedule();
+  } else {
+    console.log("No tasks or profile available for schedule generation");
+    // Clear schedule if no tasks
+    state.schedule = [];
+    renderSchedule();
+  }
+  
+  // Show feedback
+  const syncBtn = $("#syncCalendarBtn");
+  if (syncBtn) {
+    const originalText = syncBtn.innerHTML;
+    syncBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M8 1v6l4-4M8 15V9l-4 4"/></svg>Synced!';
+    syncBtn.disabled = true;
+    setTimeout(() => {
+      syncBtn.innerHTML = originalText;
+      syncBtn.disabled = false;
+    }, 2000);
+  }
+}
+
+function generateGoalColor(level) {
+  const colors = {
+    lifetime: { bg: "rgba(139, 92, 246, 0.15)", border: "rgba(139, 92, 246, 0.3)", text: "#7c3aed" },
+    yearly: { bg: "rgba(14, 165, 233, 0.15)", border: "rgba(14, 165, 233, 0.3)", text: "#0284c7" },
+    seasonal: { bg: "rgba(236, 72, 153, 0.15)", border: "rgba(236, 72, 153, 0.3)", text: "#db2777" },
+    monthly: { bg: "rgba(34, 197, 94, 0.15)", border: "rgba(34, 197, 94, 0.3)", text: "#16a34a" },
+    weekly: { bg: "rgba(251, 146, 60, 0.15)", border: "rgba(251, 146, 60, 0.3)", text: "#ea580c" },
+    daily: { bg: "rgba(168, 85, 247, 0.15)", border: "rgba(168, 85, 247, 0.3)", text: "#7c3aed" }
+  };
+  return colors[level] || colors.lifetime;
+}
+
+// ---------- Daily Habits Management ----------
+
+function initDailyHabits() {
+  const addHabitBtn = $("#addHabitBtn");
+  if (addHabitBtn) {
+    // Remove existing listener by cloning and replacing
+    const newAddHabitBtn = addHabitBtn.cloneNode(true);
+    addHabitBtn.parentNode?.replaceChild(newAddHabitBtn, addHabitBtn);
+    newAddHabitBtn.addEventListener("click", () => {
+      const habitName = prompt("Enter habit name:");
+      if (!habitName || !habitName.trim()) return;
+      
+      const habitTime = prompt("Enter time (e.g., 08:00 or 8:00 AM):");
+      if (!habitTime || !habitTime.trim()) return;
+      
+      addDailyHabit(habitName.trim(), habitTime.trim());
+    });
+  }
+  
+  renderDailyHabits();
+}
+
+function addDailyHabit(name, time) {
+  if (!state.dailyHabits) {
+    state.dailyHabits = [];
+  }
+  
+  const habit = {
+    id: `habit_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    name: name,
+    time: time,
+    description: "",
+  };
+  
+  state.dailyHabits.push(habit);
+  saveUserData();
+  renderDailyHabits();
+}
+
+function deleteDailyHabit(habitId) {
+  if (!confirm("Are you sure you want to delete this habit?")) {
+    return;
+  }
+  
+  state.dailyHabits = state.dailyHabits.filter(h => h.id !== habitId);
+  saveUserData();
+  renderDailyHabits();
+}
+
+function renderDailyHabits() {
+  const container = $("#habitsList");
+  if (!container) return;
+  
+  container.innerHTML = "";
+  
+  if (!state.dailyHabits || state.dailyHabits.length === 0) {
+    container.innerHTML = '<div class="goals-empty">No habits yet. Click "+ Add Daily Habit" to create one.</div>';
+    return;
+  }
+  
+  // Sort habits by time
+  const sortedHabits = [...state.dailyHabits].sort((a, b) => {
+    // Simple time comparison (assumes format like "08:00" or "8:00 AM")
+    const timeA = parseTimeToMinutes(a.time) || 0;
+    const timeB = parseTimeToMinutes(b.time) || 0;
+    return timeA - timeB;
+  });
+  
+  sortedHabits.forEach(habit => {
+    const habitItem = document.createElement("div");
+    habitItem.className = "habit-item";
+    habitItem.innerHTML = `
+      <div style="flex: 1;">
+        <span class="habit-name">${habit.name}</span>
+        <span class="habit-time">${habit.time}</span>
+      </div>
+      <button type="button" class="habit-delete-btn" data-habit-id="${habit.id}" title="Delete habit">×</button>
+    `;
+    container.appendChild(habitItem);
+  });
+  
+  // Handle delete button clicks (use onclick to replace handler)
+  container.onclick = (e) => {
+    const deleteBtn = e.target.closest(".habit-delete-btn");
+    if (deleteBtn) {
+      const habitId = deleteBtn.dataset.habitId;
+      if (habitId) {
+        deleteDailyHabit(habitId);
+      }
+      e.stopPropagation();
+    }
+  };
+}
+
 function ensureTaskIds() {
   if (!state.tasks) {
     state.tasks = [];
@@ -899,7 +2995,7 @@ function ensureTaskIds() {
     }
   });
   if (changed) {
-    saveState();
+    saveUserData();
   }
 }
 
@@ -931,11 +3027,19 @@ function deleteTask(taskId) {
     }
   }
 
-  saveState();
+  saveUserData();
   renderTasks();
   renderTaskSummary();
-  renderSchedule();
   renderRankedPreview();
+  
+  // Auto-regenerate schedule after task deletion
+  if (state.tasks.length > 0 && state.profile) {
+    generateSchedule();
+  } else {
+    // Clear schedule if no tasks
+    state.schedule = [];
+    renderSchedule();
+  }
   
   // Update plan button state
   $("#planTasksBtn").disabled = state.tasks.length === 0;
@@ -1018,7 +3122,7 @@ function renderTasks() {
       const task = state.tasks.find((t) => t.id === id);
       if (task) {
         task.completed = !task.completed;
-        saveState();
+        saveUserData();
         // Re-render so completed items move down & get styling
         renderTasks();
         renderTaskSummary();
@@ -1096,33 +3200,7 @@ function renderTaskSummary() {
 }
 
 function startEditTask(taskId) {
-  const task = state.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-
-  editingTaskId = taskId;
-
-  // Fill form fields
-  $("#task_name").value = task.task_name;
-  $("#task_deadline").value = task.task_deadline;
-  $("#task_deadline_time").value = task.task_deadline_time;
-  $("#task_duration").value = task.task_duration_hours;
-  $("#computer_required").checked = !!task.computer_required;
-  $("#task_priority").value = task.task_priority;
-  $("#task_category").value = task.task_category || "study";
-
-  // Highlight priority button
-  const priorityGroup = $("#task_priority_group");
-  priorityGroup
-    ?.querySelectorAll("button")
-    .forEach((btn) => btn.classList.toggle("selected", btn.dataset.value === task.task_priority));
-
-  // Change submit button text
-  const taskForm = $("#taskForm");
-  const submitBtn = taskForm?.querySelector("button[type=submit]");
-  if (submitBtn) submitBtn.textContent = "Save changes";
-
-  // Jump to task step
-  setStep(2);
+  openTaskEditor(taskId);
 }
 
 function rankTasks() {
@@ -1136,7 +3214,7 @@ function rankTasks() {
     return da.localeCompare(db);
   });
   state.rankedTasks = tasks;
-  saveState();
+  saveUserData();
 }
 
 function renderRankedPreview() {
@@ -1163,24 +3241,57 @@ function renderRankedPreview() {
 }
 
 function initWizardButtons() {
-  $("#backToProfileBtn")?.addEventListener("click", () => setStep(1));
-  $("#goToConfirmBtn")?.addEventListener("click", () => {
-    rankTasks();
-    renderRankedPreview();
-    setStep(3);
-  });
-  $("#editTasksBtn")?.addEventListener("click", () => setStep(2));
+  // Remove existing listeners by cloning and replacing elements
+  const backToProfileBtn = $("#backToProfileBtn");
+  if (backToProfileBtn) {
+    const newBtn = backToProfileBtn.cloneNode(true);
+    backToProfileBtn.parentNode?.replaceChild(newBtn, backToProfileBtn);
+    newBtn.addEventListener("click", () => setStep(1));
+  }
+  
+  const goToConfirmBtn = $("#goToConfirmBtn");
+  if (goToConfirmBtn) {
+    const newBtn = goToConfirmBtn.cloneNode(true);
+    goToConfirmBtn.parentNode?.replaceChild(newBtn, goToConfirmBtn);
+    newBtn.addEventListener("click", () => {
+      if (onboardingMode === "personalization-only") {
+        return; // Block navigation to confirm during personalization-only signup
+      }
+      rankTasks();
+      renderRankedPreview();
+      setStep(3);
+    });
+  }
+  
+  const editTasksBtn = $("#editTasksBtn");
+  if (editTasksBtn) {
+    const newBtn = editTasksBtn.cloneNode(true);
+    editTasksBtn.parentNode?.replaceChild(newBtn, editTasksBtn);
+    newBtn.addEventListener("click", () => {
+      if (onboardingMode === "personalization-only") {
+        return; // Block returning to tasks during personalization-only signup
+      }
+      setStep(2);
+    });
+  }
 
-  $("#confirmGenerateBtn")?.addEventListener("click", () => {
-    if (!state.profile || !state.rankedTasks.length) {
-      alert("Please complete your profile and tasks first.");
-      return;
-    }
-    generateSchedule();
-    renderSchedule();
-    $("#calendarSubtitle").textContent =
-      "Your tasks are time‑blocked so everything finishes before the deadline. You can click blocks to adjust or start focus.";
-  });
+  const confirmGenerateBtn = $("#confirmGenerateBtn");
+  if (confirmGenerateBtn) {
+    const newBtn = confirmGenerateBtn.cloneNode(true);
+    confirmGenerateBtn.parentNode?.replaceChild(newBtn, confirmGenerateBtn);
+    newBtn.addEventListener("click", () => {
+      if (!state.profile || !state.rankedTasks.length) {
+        alert("Please complete your profile and tasks first.");
+        return;
+      }
+      generateSchedule();
+      renderSchedule();
+      $("#calendarSubtitle").textContent =
+        "Your tasks are time‑blocked so everything finishes before the deadline. You can click blocks to adjust or start focus.";
+      // Close wizard after schedule is generated
+      setStep(null);
+    });
+  }
 }
 
 // ---------- Scheduling Engine ----------
@@ -1650,7 +3761,7 @@ function generateSchedule() {
 
   state.schedule = schedule;
   state.fixedBlocks = mergedFixedBlocks;
-  saveState();
+  saveUserData();
 }
 
 // Merge adjacent fixed blocks with the same label and date
@@ -1793,9 +3904,12 @@ function parseWeekendSchedule(text) {
 let currentCalendarView = "weekly";
 
 function initCalendarViewToggle() {
+  // Remove existing listeners by cloning and replacing elements
   $all(".btn-toggle-view").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const view = btn.dataset.view;
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode?.replaceChild(newBtn, btn);
+    newBtn.addEventListener("click", () => {
+      const view = newBtn.dataset.view;
       currentCalendarView = view;
       $all(".btn-toggle-view").forEach((b) =>
         b.classList.toggle("active", b.dataset.view === view),
@@ -1815,7 +3929,7 @@ function renderSchedule() {
       <div class="calendar-inner">
         <div class="calendar-empty-state">
           <span>🌱</span>
-          <div>Your smart schedule will appear here after you click <strong>Yes ✅</strong> in Step 3.</div>
+          <div>Your smart schedule will appear here automatically when you add tasks or daily goals.</div>
         </div>
       </div>
     `;
@@ -1840,7 +3954,7 @@ function renderTimeGridView(container, view) {
       <div class="calendar-inner">
         <div class="calendar-empty-state">
           <span>🌱</span>
-          <div>Your smart schedule will appear here after you click <strong>Yes ✅</strong> in Step 3.</div>
+          <div>Your smart schedule will appear here automatically when you add tasks or daily goals.</div>
         </div>
       </div>
     `;
@@ -2105,6 +4219,54 @@ function renderTimeGridView(container, view) {
   }
 
   inner.appendChild(grid);
+  
+  // Add current time line and current day highlighting
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentHour = today.getHours();
+  const currentMinute = today.getMinutes();
+  const currentMinutesOfDay = currentHour * 60 + currentMinute;
+  
+  // Highlight current day in header
+  dayDates.forEach((dayDate, dayIdx) => {
+    const dayStr = dayDate.toISOString().slice(0, 10);
+    if (dayStr === todayStr) {
+      const headerCell = headerRow.children[dayIdx + 1]; // +1 for time column
+      if (headerCell) {
+        headerCell.classList.add("calendar-header-cell-today");
+      }
+      
+      // Highlight current day column in grid using data-slotDate filter instead of nth-child
+      // The grid structure has time cells and slot cells interleaved, so nth-child won't work correctly
+      $all(".calendar-slot-cell").forEach(cell => {
+        if (cell.dataset.slotDate === todayStr) {
+          cell.classList.add("calendar-slot-cell-today");
+        }
+      });
+    }
+  });
+  
+  // Add current time line (only for today and if within visible hours)
+  if (currentMinutesOfDay >= startHour * 60 && currentMinutesOfDay < endHour * 60) {
+    const timeLine = document.createElement("div");
+    timeLine.className = "calendar-current-time-line";
+    const timeLinePosition = ((currentMinutesOfDay - startHour * 60) / 30) * 20; // 20px per 30-min slot
+    timeLine.style.top = `${timeLinePosition}px`;
+    
+    // Find today's column using data-slotDate filter (same approach as highlighting above)
+    // The grid structure has time cells and slot cells interleaved, so nth-child won't work correctly
+    const todaySlots = $all(".calendar-slot-cell").filter(cell => cell.dataset.slotDate === todayStr);
+    if (todaySlots.length > 0) {
+      const firstSlot = todaySlots[0];
+      const slotRect = firstSlot.getBoundingClientRect();
+      const gridRect = grid.getBoundingClientRect();
+      timeLine.style.left = `${slotRect.left - gridRect.left}px`;
+      timeLine.style.width = `${slotRect.width}px`;
+      inner.style.position = "relative";
+      inner.appendChild(timeLine);
+    }
+  }
+  
   container.innerHTML = "";
   container.appendChild(inner);
 }
@@ -2121,7 +4283,7 @@ function renderMonthlyView(container) {
       <div class="calendar-inner">
         <div class="calendar-empty-state">
           <span>🌱</span>
-          <div>Your smart schedule will appear here after you click <strong>Yes ✅</strong> in Step 3.</div>
+          <div>Your smart schedule will appear here automatically when you add tasks or daily goals.</div>
         </div>
       </div>
     `;
@@ -2347,7 +4509,7 @@ function handleDrop(e, slotCell, slotStartISO, dayDate) {
   if (scheduleIndex !== -1) {
     state.schedule[scheduleIndex].start = newStart.toISOString();
     state.schedule[scheduleIndex].end = newEnd.toISOString();
-    saveState();
+    saveUserData();
     renderSchedule();
     showToast("Task moved successfully!");
   }
@@ -2411,6 +4573,50 @@ function startCountdown(block) {
 
 // ---------- Chatbot ----------
 
+// Simple markdown parser for chatbot messages
+function parseMarkdown(text) {
+  if (!text) return "";
+  
+  // Escape HTML to prevent XSS
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  
+  // Use placeholders to avoid conflicts between bold and italic
+  const placeholders = [];
+  let placeholderIndex = 0;
+  
+  // First, replace bold **text** with placeholders
+  html = html.replace(/\*\*(.+?)\*\*/g, (match, content) => {
+    const placeholder = `__BOLDPLACEHOLDER_${placeholderIndex}__`;
+    placeholders[placeholderIndex] = `<strong>${content}</strong>`;
+    placeholderIndex++;
+    return placeholder;
+  });
+  
+  // Then replace bold __text__ with placeholders
+  html = html.replace(/__(.+?)__/g, (match, content) => {
+    const placeholder = `__BOLDPLACEHOLDER_${placeholderIndex}__`;
+    placeholders[placeholderIndex] = `<strong>${content}</strong>`;
+    placeholderIndex++;
+    return placeholder;
+  });
+  
+  // Then process italic (single asterisk only, underscores are used for bold)
+  html = html.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
+  
+  // Restore bold placeholders
+  placeholders.forEach((replacement, index) => {
+    html = html.replace(`__BOLDPLACEHOLDER_${index}__`, replacement);
+  });
+  
+  // Line breaks: \n to <br>
+  html = html.replace(/\n/g, "<br>");
+  
+  return html;
+}
+
 function initChatbot() {
   const chatWindow = $("#chatWindow");
   const chatForm = $("#chatForm");
@@ -2420,14 +4626,15 @@ function initChatbot() {
   function addMessage(text, sender) {
     const msg = document.createElement("div");
     msg.className = `chat-message ${sender}`;
-    msg.innerHTML = text;
+    // Parse markdown for bot messages, escape HTML for user messages
+    msg.innerHTML = sender === "bot" ? parseMarkdown(text) : text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     chatWindow.appendChild(msg);
     chatWindow.scrollTop = chatWindow.scrollHeight;
   }
 
   function initialMessage() {
     addMessage(
-      "Hi! I’m your PlanWise assistant. Tell me how you’re feeling about your workload or ask for help with prioritizing, focus, or breaks.",
+      "Hi! I’m your Axis assistant. Tell me how you’re feeling about your workload or ask for help with prioritizing, focus, or breaks.",
       "bot",
     );
   }
@@ -2517,10 +4724,243 @@ function fallbackRuleBasedReply(text) {
 
 // ---------- Restore ----------
 
+// ---------- Reflection System ----------
+
+// Check reflections periodically using real time (every hour)
+let reflectionCheckInterval = null;
+let reflectionPromptActive = false; // Track if a reflection prompt is currently showing
+
+function startReflectionChecker() {
+  // Clear any existing interval
+  if (reflectionCheckInterval) {
+    clearInterval(reflectionCheckInterval);
+  }
+  
+  // Don't check immediately on start - only check periodically based on real time
+  // This prevents prompts from appearing every time the user opens the website
+  
+  // Check every hour (3600000 ms) to see if it's time for a reflection
+  reflectionCheckInterval = setInterval(() => {
+    checkReflectionDue();
+  }, 3600000); // 1 hour
+}
+
+function stopReflectionChecker() {
+  if (reflectionCheckInterval) {
+    clearInterval(reflectionCheckInterval);
+    reflectionCheckInterval = null;
+  }
+}
+
+function checkReflectionDue() {
+  // Don't check if a prompt is already active
+  if (reflectionPromptActive) {
+    return;
+  }
+  
+  if (!state.reflections) state.reflections = [];
+  
+  const now = new Date();
+  
+  // Check weekly reflection (required every 7 days)
+  const lastWeekly = state.reflections
+    .filter(r => r.type === "weekly")
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  
+  if (lastWeekly) {
+    // User has submitted at least one weekly reflection
+    // Check if 7 days have passed since the last one
+    const lastWeeklyDate = new Date(lastWeekly.date);
+    const daysSince = Math.floor((now - lastWeeklyDate) / (1000 * 60 * 60 * 24));
+    
+    if (daysSince >= 7) {
+      // Calculate next due date (7 days from last reflection)
+      const nextDueDate = new Date(lastWeeklyDate);
+      nextDueDate.setDate(nextDueDate.getDate() + 7);
+      
+      // Only prompt if we've reached or passed the due date
+      if (now >= nextDueDate) {
+        showReflectionPrompt("weekly");
+        return;
+      }
+    }
+  } else {
+    // No weekly reflection yet - check if 7 days have passed since signup
+    if (state.firstReflectionDueDate) {
+      const dueDate = new Date(state.firstReflectionDueDate);
+      // Only prompt if we've reached or passed the due date
+      if (now >= dueDate) {
+        showReflectionPrompt("weekly");
+        return;
+      }
+    } else {
+      // Initialize first reflection due date if it doesn't exist
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 7);
+      state.firstReflectionDueDate = dueDate.toISOString();
+      saveUserData();
+    }
+  }
+  
+  // Check monthly reflection (required every 30 days)
+  const lastMonthly = state.reflections
+    .filter(r => r.type === "monthly")
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  
+  if (lastMonthly) {
+    // User has submitted at least one monthly reflection
+    // Check if 30 days have passed since the last one
+    const lastMonthlyDate = new Date(lastMonthly.date);
+    const daysSince = Math.floor((now - lastMonthlyDate) / (1000 * 60 * 60 * 24));
+    
+    if (daysSince >= 30) {
+      // Calculate next due date (30 days from last reflection)
+      const nextDueDate = new Date(lastMonthlyDate);
+      nextDueDate.setDate(nextDueDate.getDate() + 30);
+      
+      // Only prompt if we've reached or passed the due date
+      if (now >= nextDueDate) {
+        showReflectionPrompt("monthly");
+        return;
+      }
+    }
+  }
+  // If no monthly reflection yet, we'll wait until they've done at least one weekly
+}
+
+function showReflectionPrompt(type) {
+  // Prevent multiple prompts from showing
+  if (reflectionPromptActive) {
+    return;
+  }
+  
+  const modal = $("#reflectionModal");
+  if (!modal) return;
+  
+  // Mark that a prompt is now active
+  reflectionPromptActive = true;
+  
+  const title = $("#reflectionTitle");
+  
+  if (title) {
+    title.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)} Reflection`;
+  }
+  
+  modal.classList.remove("hidden");
+  
+  // Handle form submission - remove existing listener first to avoid accumulation
+  const form = $("#reflectionForm");
+  if (form) {
+    // Remove existing listener by cloning and replacing the form
+    const newForm = form.cloneNode(true);
+    form.parentNode?.replaceChild(newForm, form);
+    
+    // Update textarea reference since we cloned the form
+    const textarea = newForm.querySelector("#reflectionText");
+    
+    if (textarea) {
+      textarea.value = "";
+      textarea.placeholder = type === "weekly"
+        ? "Reflect on your week: Overall progress, emotional patterns, procrastination triggers, focus levels, what worked and what didn't..."
+        : "Reflect on your month: Major achievements, recurring patterns, emotional trends, productivity insights, goals progress...";
+    }
+    
+    const handler = async (e) => {
+      e.preventDefault();
+      const content = textarea.value.trim();
+      if (!content) {
+        alert("Please write your reflection.");
+        return;
+      }
+      
+      // Save reflection
+      const reflection = {
+        id: `reflection_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type,
+        date: new Date().toISOString(),
+        content,
+        analysis: null, // Will be filled by AI
+      };
+      
+      if (!state.reflections) state.reflections = [];
+      state.reflections.push(reflection);
+      
+      // Analyze reflection with AI
+      try {
+        const analysis = await analyzeReflection(content, type);
+        reflection.analysis = analysis;
+        saveUserData();
+      } catch (err) {
+        console.error("Error analyzing reflection:", err);
+        saveUserData(); // Save anyway
+      }
+      
+      modal.classList.add("hidden");
+      reflectionPromptActive = false; // Reset flag when reflection is saved
+      
+      // Don't immediately check for more reflections - let the periodic checker handle it
+    };
+    
+    newForm.addEventListener("submit", handler);
+  }
+  
+  // Close button - use onclick to replace handler instead of addEventListener to avoid accumulation
+  const closeBtn = $("#closeReflectionBtn");
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      modal.classList.add("hidden");
+      reflectionPromptActive = false; // Reset flag when modal is closed
+    };
+  }
+  
+  // Modal overlay - use onclick to replace handler
+  const overlay = modal.querySelector(".modal-overlay");
+  if (overlay) {
+    overlay.onclick = () => {
+      modal.classList.add("hidden");
+      reflectionPromptActive = false; // Reset flag when modal is closed
+    };
+  }
+}
+
+async function analyzeReflection(content, type) {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: `Analyze this ${type} reflection and provide insights on: 1) Emotional patterns (stress, motivation, satisfaction), 2) Procrastination indicators, 3) Focus/productivity patterns, 4) Suggestions for improvement. Keep it concise (2-3 sentences).\n\nReflection: ${content}`,
+        context: `User profile: ${JSON.stringify(state.profile || {})}`,
+      }),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      return data.reply || "Analysis pending.";
+    }
+    return "Analysis pending.";
+  } catch (err) {
+    console.error("Error analyzing reflection:", err);
+    return "Analysis pending.";
+  }
+}
+
 function restoreFromState() {
   if (state.profile) {
     restoreProfileToForm();
   }
+  
+  // Initialize sync button
+  const syncBtn = $("#syncCalendarBtn");
+  if (syncBtn) {
+    // Remove existing listeners by cloning
+    const newSyncBtn = syncBtn.cloneNode(true);
+    syncBtn.parentNode?.replaceChild(newSyncBtn, syncBtn);
+    newSyncBtn.addEventListener("click", () => {
+      manualSyncCalendar();
+    });
+  }
+  
   if (state.goals) {
     renderGoals();
     updateCategoryDropdown();
@@ -2532,12 +4972,20 @@ function restoreFromState() {
   if (state.rankedTasks?.length) {
     renderRankedPreview();
   }
-  renderSchedule();
-  if (state.profile) {
-    setStep(2);
-  } else {
-    setStep(1);
+  if (state.dailyHabits) {
+    renderDailyHabits();
   }
+  renderSchedule();
+  
+  // Only show wizard when explicitly in onboarding mode
+  if (shouldShowOnboarding && !state.profile) {
+    setStep(1); // Show personalization wizard
+  } else {
+    setStep(null); // Hide wizard, show dashboard
+  }
+  
+  // Start periodic reflection checker (checks every hour)
+  startReflectionChecker();
 }
 
 

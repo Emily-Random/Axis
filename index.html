@@ -3,38 +3,126 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PlanWise - AI Student Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <title>Axis - AI Student Planner</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo">
-        <span class="logo-mark">PW</span>
-        <span class="logo-text">PlanWise</span>
-      </div>
-      <div class="header-message">
-        Supportive, structured planning to keep you ahead of your deadlines. Procrastination is never allowed here.
-      </div>
-    </header>
+    <!-- Login/Signup Screen -->
+    <div id="authScreen" class="auth-screen">
+      <div class="auth-container">
+        <div class="auth-header">
+          <div class="logo">
+            <span class="logo-mark target-icon" aria-hidden="true"></span>
+            <span class="logo-text">Axis</span>
+          </div>
+          <p class="auth-tagline">Precision planning with calm focus</p>
+        </div>
+        
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Log In</button>
+          <button class="auth-tab" data-tab="signup">Sign Up</button>
+        </div>
 
-    <main class="app-main">
+        <!-- Login Form -->
+        <div id="loginForm" class="auth-form active">
+          <form id="loginFormElement">
+            <div class="form-group">
+              <label for="loginEmail">Email</label>
+              <input type="email" id="loginEmail" required autocomplete="email" />
+            </div>
+            <div class="form-group">
+              <label for="loginPassword">Password</label>
+              <input type="password" id="loginPassword" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Log In</button>
+            <div class="auth-divider">
+              <span>or</span>
+            </div>
+            <button type="button" id="googleLoginBtn" class="btn btn-google btn-full">
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.965-2.184l-2.908-2.258c-.806.54-1.837.86-3.057.86-2.35 0-4.34-1.587-5.053-3.716H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.955 10.718c-.18-.54-.282-1.117-.282-1.718s.102-1.178.282-1.718V4.95H.957C.348 6.175 0 7.55 0 9s.348 2.825.957 4.05l2.998-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.95L3.955 7.282C4.668 5.153 6.658 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </button>
+            <div id="authError" class="auth-error hidden"></div>
+          </form>
+        </div>
+
+        <!-- Signup Form -->
+        <div id="signupForm" class="auth-form">
+          <form id="signupFormElement">
+            <div class="form-group">
+              <label for="signupName">Name</label>
+              <input type="text" id="signupName" required autocomplete="name" />
+            </div>
+            <div class="form-group">
+              <label for="signupEmail">Email</label>
+              <input type="email" id="signupEmail" required autocomplete="email" />
+            </div>
+            <div class="form-group">
+              <label for="signupPassword">Password</label>
+              <input type="password" id="signupPassword" required autocomplete="new-password" minlength="8" />
+              <small class="form-hint">Minimum 8 characters</small>
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+            <div class="auth-divider">
+              <span>or</span>
+            </div>
+            <button type="button" id="googleSignupBtn" class="btn btn-google btn-full">
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.965-2.184l-2.908-2.258c-.806.54-1.837.86-3.057.86-2.35 0-4.34-1.587-5.053-3.716H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.955 10.718c-.18-.54-.282-1.117-.282-1.718s.102-1.178.282-1.718V4.95H.957C.348 6.175 0 7.55 0 9s.348 2.825.957 4.05l2.998-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.95L3.955 7.282C4.668 5.153 6.658 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </button>
+            <div id="signupError" class="auth-error hidden"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Dashboard (hidden until authenticated) -->
+    <div id="dashboard" class="dashboard hidden">
+      <!-- Header -->
+      <header class="app-header">
+        <div class="logo">
+          <span class="logo-mark target-icon" aria-hidden="true"></span>
+          <span class="logo-text">Axis</span>
+        </div>
+        <div class="header-message">
+          Precision planning with calm focus
+        </div>
+        <div class="header-actions">
+          <button id="settingsBtn" class="btn-icon" title="Settings">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="10" cy="10" r="3"/>
+              <path d="M10 1v4M10 15v4M19 10h-4M5 10H1M16.66 3.34l-2.83 2.83M6.17 13.83l-2.83 2.83M16.66 16.66l-2.83-2.83M6.17 6.17L3.34 3.34"/>
+            </svg>
+          </button>
+          <button id="logoutBtn" class="btn-icon" title="Logout">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 3H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h5M13 7l4 4-4 4M17 11H7"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="app-main">
       <!-- Left Sidebar -->
       <aside class="sidebar">
         <!-- Goals Section -->
         <section class="panel panel-goals">
           <div class="panel-header">
-            <h2>Long-Term Goals</h2>
-            <span class="panel-subtitle">Create goals to organize your tasks</span>
+            <div class="panel-header-row">
+              <div>
+            <h2>Goals Hierarchy</h2>
+            <span class="panel-subtitle">Your goals across different timeframes</span>
+              </div>
+              <button id="addGoalBtn" class="btn btn-secondary btn-sm">+ Add goal</button>
+            </div>
           </div>
           <div class="goals-content">
-            <button type="button" id="addGoalBtn" class="btn-add-goal" title="Add a new goal">
-              <span class="btn-add-goal-icon">+</span>
-              <span>Add Long-Term Goal</span>
-            </button>
-            <div id="goalsList" class="goals-list">
-              <!-- Goals populated by JS -->
+            <div id="goalsList" class="goals-list-hierarchy">
+              <!-- Goals populated by JS with hierarchy -->
             </div>
           </div>
         </section>
@@ -42,18 +130,42 @@
         <!-- To-Do List -->
         <section class="panel panel-tasks">
           <div class="panel-header">
-            <h2>To‑Do List</h2>
-            <span class="panel-subtitle">Ranked by urgency &amp; deadlines</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <div>
+                <h2>To‑Do List</h2>
+                <span class="panel-subtitle">Ranked by urgency &amp; deadlines</span>
+              </div>
+              <button type="button" id="addTaskBtn" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem;" title="Add new task">
+                + Add Task
+              </button>
+            </div>
           </div>
           <div id="taskList" class="task-list">
             <!-- Tasks populated by JS -->
           </div>
         </section>
 
+        <!-- Daily Habits -->
+        <section class="panel panel-habits">
+          <div class="panel-header">
+            <h2>Daily Habits</h2>
+            <span class="panel-subtitle">Fixed tasks you can set up</span>
+          </div>
+          <div class="habits-content">
+            <button type="button" id="addHabitBtn" class="btn-add-goal" title="Add a new habit">
+              <span class="btn-add-goal-icon">+</span>
+              <span>Add Daily Habit</span>
+            </button>
+            <div id="habitsList" class="habits-list">
+              <!-- Daily habits populated by JS -->
+            </div>
+          </div>
+        </section>
+
         <!-- Chatbot -->
         <section class="panel panel-chat">
           <div class="panel-header">
-            <h2>PlanWise Assistant</h2>
+            <h2>Axis Assistant</h2>
             <span class="panel-subtitle">Ask for planning &amp; focus tips</span>
           </div>
           <div id="chatWindow" class="chat-window">
@@ -71,20 +183,48 @@
         </section>
       </aside>
 
-      <!-- Right Main Panel -->
-      <section class="main-panel">
-        <!-- Multi-step onboarding & tasks -->
-        <section id="wizard" class="wizard">
-          <!-- Step indicators -->
-          <div class="wizard-steps">
-            <div class="wizard-step-indicator" data-step="1">1. Profile</div>
-            <div class="wizard-step-indicator" data-step="2">2. Tasks</div>
-            <div class="wizard-step-indicator" data-step="3">3. Confirm</div>
+      <!-- Middle: Calendar -->
+      <section class="calendar-section">
+        <header class="calendar-header">
+          <div class="calendar-title">
+            <h2>Your AI‑generated schedule</h2>
+            <span id="calendarSubtitle" class="calendar-subtitle">
+              Once generated, your time‑blocked plan will appear here.
+            </span>
           </div>
+          <div class="calendar-controls">
+            <button id="syncCalendarBtn" class="btn btn-secondary btn-sync" title="Sync daily goals to tasks and regenerate schedule">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                <path d="M1 8v6h6M15 8V2H9M1 8l6-6M15 8l-6 6"/>
+              </svg>
+              Sync Calendar
+            </button>
+            <button class="btn-toggle-view active" data-view="daily">Daily</button>
+            <button class="btn-toggle-view" data-view="weekly">Weekly</button>
+            <button class="btn-toggle-view" data-view="monthly">Monthly</button>
+          </div>
+        </header>
+
+        <div id="calendarContainer" class="calendar-container">
+          <!-- Calendar rendered by JS -->
+        </div>
+      </section>
+
+
+      <!-- Multi-step onboarding modal (only shown during signup) -->
+      <div id="wizard" class="wizard-modal hidden">
+        <div class="wizard-overlay"></div>
+        <div class="wizard-content">
+          <section class="wizard">
+        <!-- Step indicators -->
+        <div class="wizard-steps">
+          <div class="wizard-step-indicator" data-step="1">1. Profile</div>
+          <div class="wizard-step-indicator" data-step="2">2. Goals</div>
+        </div>
 
           <!-- Step 1: Onboarding -->
           <div class="wizard-step" data-step="1">
-            <h2>Step 1: Tell PlanWise about you</h2>
+            <h2>Step 1: Tell Axis about you</h2>
             <p class="step-description">
               I’ll create a realistic plan around your real life, not the other way around.
             </p>
@@ -250,6 +390,17 @@
                 </div>
               </fieldset>
 
+              <!-- Goals Hierarchy -->
+              <fieldset>
+                <legend>Goals Hierarchy</legend>
+                <p class="hint">
+                  Set your goals across different timeframes. The AI will help you break them down and organize your tasks accordingly.
+                </p>
+                <div id="onboardingGoalsHierarchy" class="goals-hierarchy">
+                  <!-- Goals will be rendered here by JS -->
+                </div>
+              </fieldset>
+
               <div class="wizard-actions">
                 <button type="button" id="saveProfileBtn" class="btn btn-primary">
                   Save profile &amp; continue
@@ -258,98 +409,34 @@
             </form>
           </div>
 
-          <!-- Step 2: Task Input -->
+          <!-- Step 2: Goal Canvas -->
           <div class="wizard-step" data-step="2">
-            <h2>Step 2: Add your tasks</h2>
+            <h2>Step 2: Set Your Goals</h2>
             <p class="step-description">
-              I’ll sort these by urgency and deadline, then place them intelligently into your week.
+              Create your goal hierarchy by adding long-term goals. Choose your preferred timeframe, and AI will suggest breakdown goals automatically.
             </p>
 
-            <form id="taskForm" class="task-form">
-              <label>
-                What is the task?
-                <input type="text" id="task_name" required />
-              </label>
-
-              <label>How important and urgent is it?</label>
-              <div class="priority-buttons" id="task_priority_group">
-                <button type="button" data-value="Urgent & Important" class="priority urgent-important">
-                  Urgent &amp; Important
+            <div class="goal-canvas-container">
+              <div id="goalCanvas" class="goal-canvas">
+                <!-- Canvas sections and nodes will be rendered here -->
+                <button id="approveAllGhostsBtn" class="btn-approve-all-ghosts hidden">
+                  Approve All AI Suggestions
                 </button>
-                <button type="button" data-value="Urgent, Not Important" class="priority urgent-not-important">
-                  Urgent, Not Important
-                </button>
-                <button type="button" data-value="Important, Not Urgent" class="priority important-not-urgent">
-                  Important, Not Urgent
-                </button>
-                <button type="button" data-value="Not Urgent & Not Important" class="priority not-urgent-not-important">
-                  Not Urgent &amp; Not Important
-                </button>
-                <input type="hidden" id="task_priority" />
               </div>
-
-              <label>
-                Category
-                <select id="task_category" required>
-                  <option value="">Select...</option>
-                  <option value="study">Study</option>
-                  <option value="project">Project</option>
-                  <option value="chores">Chores</option>
-                  <option value="personal">Personal</option>
-                  <option value="social">Social</option>
-                </select>
-              </label>
-
-              <div class="two-col">
-                <label>
-                  Deadline (date)
-                  <input type="date" id="task_deadline" required />
-                </label>
-
-                <label>
-                  Deadline time
-                  <select id="task_deadline_time">
-                    <!-- 15-min intervals generated by JS -->
-                  </select>
-                </label>
+              <div id="goalEditorPanel" class="goal-editor-panel hidden">
+                <h3>Edit Goal</h3>
+                <textarea id="goalEditorText" placeholder="Enter your goal..." rows="4"></textarea>
+                <div class="goal-editor-actions">
+                  <button id="saveGoalBtn" class="btn btn-primary">Save</button>
+                  <button id="confirmGhostBtn" class="btn btn-success hidden">Confirm Suggestion</button>
+                  <button id="deleteGoalBtn" class="btn btn-ghost">Delete</button>
+                </div>
               </div>
-
-              <div class="two-col">
-                <label>
-                  Estimated duration (hours)
-                  <input
-                    type="number"
-                    id="task_duration"
-                    min="0.5"
-                    step="0.5"
-                    placeholder="e.g., 2"
-                    required
-                  />
-                </label>
-
-                <label class="checkbox-row">
-                  <input type="checkbox" id="computer_required" />
-                  <span>Does this task require a computer?</span>
-                </label>
-              </div>
-
-              <div class="wizard-actions">
-                <button type="submit" class="btn btn-secondary">Add task to list</button>
-              </div>
-            </form>
-
-            <div class="tasks-summary">
-              <h3>Tasks you've added</h3>
-              <p class="hint">You can keep adding tasks. When you’re ready, I’ll create your schedule.</p>
-              <div id="taskSummaryList" class="task-summary-list"></div>
-              <button id="planTasksBtn" class="btn btn-primary" disabled>
-                Plan My Tasks
-              </button>
             </div>
 
             <div class="wizard-actions wizard-actions-bottom">
-              <button type="button" id="backToProfileBtn" class="btn btn-ghost">Back to profile</button>
-              <button type="button" id="goToConfirmBtn" class="btn btn-primary">Continue</button>
+              <button type="button" id="backToProfileBtn" class="btn btn-ghost">Back</button>
+              <button type="button" id="finishGoalsBtn" class="btn btn-primary">Finish</button>
             </div>
           </div>
 
@@ -381,31 +468,11 @@
             </div>
           </div>
         </section>
+        </div>
+      </div>
+      </main>
 
-        <!-- Calendar & Schedule -->
-        <section class="calendar-section">
-          <header class="calendar-header">
-            <div class="calendar-title">
-              <h2>Your AI‑generated schedule</h2>
-              <span id="calendarSubtitle" class="calendar-subtitle">
-                Once generated, your time‑blocked plan will appear here.
-              </span>
-            </div>
-            <div class="calendar-controls">
-              <button class="btn-toggle-view active" data-view="daily">Daily</button>
-              <button class="btn-toggle-view" data-view="weekly">Weekly</button>
-              <button class="btn-toggle-view" data-view="monthly">Monthly</button>
-            </div>
-          </header>
-
-          <div id="calendarContainer" class="calendar-container">
-            <!-- Calendar rendered by JS -->
-          </div>
-        </section>
-      </section>
-    </main>
-
-    <!-- Countdown overlay for deadline-driven procrastinators -->
+      <!-- Countdown overlay for deadline-driven procrastinators -->
     <div id="countdownOverlay" class="countdown-overlay hidden">
       <div class="countdown-card">
         <h3>Focus countdown</h3>
@@ -415,29 +482,195 @@
       </div>
     </div>
 
-    <!-- Pomodoro Timer Modal -->
-    <div id="pomodoroModal" class="pomodoro-modal hidden">
-      <div class="pomodoro-modal-content">
-        <div class="pomodoro-header">
-          <h2>Focus Timer</h2>
-          <button id="closePomodoroBtn" class="pomodoro-close-btn" title="Close">×</button>
+      <!-- Settings Panel -->
+      <div id="settingsPanel" class="settings-panel hidden">
+        <div class="settings-overlay"></div>
+        <div class="settings-content">
+          <div class="settings-header">
+            <h2>Settings</h2>
+            <button id="closeSettingsBtn" class="btn-icon" title="Close">×</button>
+          </div>
+          <div class="settings-tabs">
+            <button class="settings-tab active" data-tab="profile">Profile</button>
+            <button class="settings-tab" data-tab="goals">Goals</button>
+            <button class="settings-tab" data-tab="blocking">Website Blocking</button>
+            <button class="settings-tab" data-tab="reflections">Reflections</button>
+          </div>
+          
+          <!-- Profile Settings -->
+          <div id="settingsProfile" class="settings-section active">
+            <h3>Edit Profile</h3>
+            <form id="profileEditForm" class="settings-form">
+              <!-- Profile fields from original onboarding will be moved here -->
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="profileEditName" />
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="profileEditEmail" disabled />
+                <small class="form-hint">Email cannot be changed</small>
+              </div>
+              <button type="submit" class="btn btn-primary">Save Changes</button>
+            </form>
+          </div>
+
+          <!-- Goals Settings -->
+          <div id="settingsGoals" class="settings-section">
+            <h3>Goals Hierarchy</h3>
+            <div id="goalsHierarchy" class="goals-hierarchy">
+              <!-- Goals hierarchy will be rendered here -->
+            </div>
+          </div>
+
+          <!-- Blocking Settings -->
+          <div id="settingsBlocking" class="settings-section">
+            <h3>Website Blocking Rules</h3>
+            <p class="settings-description">Configure rules to block or redirect distracting websites.</p>
+            <div id="blockingRulesList" class="blocking-rules-list">
+              <!-- Blocking rules will be rendered here -->
+            </div>
+            <button id="addBlockingRuleBtn" class="btn btn-secondary">Add Rule</button>
+          </div>
+
+          <!-- Reflections Settings -->
+          <div id="settingsReflections" class="settings-section">
+            <h3>Reflection History</h3>
+            <div id="reflectionsList" class="reflections-list">
+              <!-- Reflection history will be rendered here -->
+            </div>
+          </div>
         </div>
-        <div class="pomodoro-task-info">
-          <p id="pomodoroTaskName" class="pomodoro-task-name"></p>
-          <p id="pomodoroTaskCategory" class="pomodoro-task-category"></p>
+      </div>
+
+      <!-- Task Editor Modal -->
+      <div id="taskEditorModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 id="taskEditorTitle">Add Task</h2>
+            <button id="closeTaskEditorBtn" class="btn-icon" title="Close">×</button>
+          </div>
+          <form id="taskEditorForm" class="modal-form">
+            <div class="form-group">
+              <label for="taskEditor_name">What is the task?</label>
+              <input type="text" id="taskEditor_name" required />
+            </div>
+
+            <div class="form-group">
+              <label>How important and urgent is it?</label>
+              <div class="priority-buttons" id="taskEditor_priority_group">
+                <button type="button" data-value="Urgent & Important" class="priority urgent-important">
+                  Urgent &amp; Important
+                </button>
+                <button type="button" data-value="Urgent, Not Important" class="priority urgent-not-important">
+                  Urgent, Not Important
+                </button>
+                <button type="button" data-value="Important, Not Urgent" class="priority important-not-urgent">
+                  Important, Not Urgent
+                </button>
+                <button type="button" data-value="Not Urgent & Not Important" class="priority not-urgent-not-important">
+                  Not Urgent &amp; Not Important
+                </button>
+                <input type="hidden" id="taskEditor_priority" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="taskEditor_category">Category</label>
+              <select id="taskEditor_category" required>
+                <option value="">Select...</option>
+                <option value="study">Study</option>
+                <option value="project">Project</option>
+                <option value="chores">Chores</option>
+                <option value="personal">Personal</option>
+                <option value="social">Social</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label for="taskEditor_deadline">Deadline (date)</label>
+                <input type="date" id="taskEditor_deadline" required />
+              </div>
+              <div>
+                <label for="taskEditor_deadline_time">Deadline time</label>
+                <select id="taskEditor_deadline_time">
+                  <!-- 15-min intervals generated by JS -->
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label for="taskEditor_duration">Estimated duration (hours)</label>
+                <input
+                  type="number"
+                  id="taskEditor_duration"
+                  min="0.5"
+                  step="0.5"
+                  placeholder="e.g., 2"
+                  required
+                />
+              </div>
+              <div style="display: flex; align-items: flex-end;">
+                <label class="checkbox-row" style="margin: 0;">
+                  <input type="checkbox" id="taskEditor_computer_required" />
+                  <span>Requires computer?</span>
+                </label>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+              <button type="button" id="cancelTaskEditorBtn" class="btn btn-ghost">Cancel</button>
+              <button type="submit" class="btn btn-primary">Add Task</button>
+            </div>
+          </form>
         </div>
-        <div class="pomodoro-timer-display">
-          <div id="pomodoroTimer" class="pomodoro-timer">25:00</div>
-          <div class="pomodoro-status" id="pomodoroStatus">Ready to start</div>
+      </div>
+
+      <!-- Reflection Modal -->
+      <div id="reflectionModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-content-large">
+          <div class="modal-header">
+            <h2 id="reflectionTitle">Reflection</h2>
+            <button id="closeReflectionBtn" class="btn-icon" title="Close">×</button>
+          </div>
+          <form id="reflectionForm" class="modal-form">
+            <div class="form-group">
+              <label>Reflection</label>
+              <textarea id="reflectionText" rows="12" placeholder="Write your reflection here..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Reflection</button>
+          </form>
         </div>
-        <div class="pomodoro-controls">
-          <button id="pomodoroStartBtn" class="btn btn-primary pomodoro-btn">Start</button>
-          <button id="pomodoroPauseBtn" class="btn btn-secondary pomodoro-btn hidden">Pause</button>
-          <button id="pomodoroResetBtn" class="btn btn-secondary pomodoro-btn">Reset</button>
-        </div>
-        <div class="pomodoro-progress">
-          <div id="pomodoroProgressBar" class="pomodoro-progress-bar">
-            <div id="pomodoroProgressFill" class="pomodoro-progress-fill"></div>
+      </div>
+
+      <!-- Pomodoro Timer Modal -->
+      <div id="pomodoroModal" class="pomodoro-modal hidden">
+        <div class="pomodoro-modal-content">
+          <div class="pomodoro-header">
+            <h2>Focus Timer</h2>
+            <button id="closePomodoroBtn" class="pomodoro-close-btn" title="Close">×</button>
+          </div>
+          <div class="pomodoro-task-info">
+            <p id="pomodoroTaskName" class="pomodoro-task-name"></p>
+            <p id="pomodoroTaskCategory" class="pomodoro-task-category"></p>
+          </div>
+          <div class="pomodoro-timer-display">
+            <div id="pomodoroTimer" class="pomodoro-timer">25:00</div>
+            <div class="pomodoro-status" id="pomodoroStatus">Ready to start</div>
+          </div>
+          <div class="pomodoro-controls">
+            <button id="pomodoroStartBtn" class="btn btn-primary pomodoro-btn">Start</button>
+            <button id="pomodoroPauseBtn" class="btn btn-secondary pomodoro-btn hidden">Pause</button>
+            <button id="pomodoroResetBtn" class="btn btn-secondary pomodoro-btn">Reset</button>
+          </div>
+          <div class="pomodoro-progress">
+            <div id="pomodoroProgressBar" class="pomodoro-progress-bar">
+              <div id="pomodoroProgressFill" class="pomodoro-progress-fill"></div>
+            </div>
           </div>
         </div>
       </div>
