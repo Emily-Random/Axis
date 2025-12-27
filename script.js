@@ -63,6 +63,193 @@ function initTheme() {
 
 initTheme();
 
+// ---------- Keyboard Shortcuts (Phase 2A) ----------
+
+let axisHotkeysInitialized = false;
+let axisSelectedTaskId = null;
+
+function axisIsEditableTarget(target) {
+  if (!target || !(target instanceof Element)) return false;
+  if (target.closest?.("[data-hotkeys-disabled]")) return true;
+  const tag = target.tagName?.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return true;
+  return Boolean(target.isContentEditable);
+}
+
+function setSelectedTaskForShortcuts(taskId) {
+  axisSelectedTaskId = taskId || null;
+  try {
+    window.AxisKeyboardShortcuts?.setSelectedTaskId?.(axisSelectedTaskId);
+  } catch {}
+}
+
+function getSelectedTaskForShortcuts() {
+  try {
+    const id = window.AxisKeyboardShortcuts?.getSelectedTaskId?.();
+    if (id) return id;
+  } catch {}
+  return axisSelectedTaskId || null;
+}
+
+function closeAnyOpenModal() {
+  if (window.AxisOnboardingTour?.isOpen?.()) {
+    window.AxisOnboardingTour.skip?.();
+    return true;
+  }
+
+  // 1) Command palette / help
+  if (window.AxisKeyboardShortcuts?.isCommandPaletteOpen?.()) {
+    window.AxisKeyboardShortcuts.closeCommandPalette?.();
+    return true;
+  }
+  const shortcuts = document.getElementById("shortcutsHelpModal");
+  if (shortcuts && !shortcuts.classList.contains("hidden")) {
+    shortcuts.classList.add("hidden");
+    return true;
+  }
+
+  const notifications = document.getElementById("notificationDropdown");
+  if (notifications && !notifications.classList.contains("hidden")) {
+    window.AxisNotifications?.closeDropdown?.();
+    notifications.classList.add("hidden");
+    return true;
+  }
+
+  // 2) Core modals
+  const taskEditor = document.getElementById("taskEditorModal");
+  if (taskEditor && !taskEditor.classList.contains("hidden")) {
+    if (typeof closeTaskEditor === "function") closeTaskEditor();
+    else taskEditor.classList.add("hidden");
+    return true;
+  }
+
+  const addGoal = document.getElementById("addGoalModal");
+  if (addGoal && !addGoal.classList.contains("hidden")) {
+    if (typeof closeAddGoalModal === "function") closeAddGoalModal();
+    else addGoal.classList.add("hidden");
+    return true;
+  }
+
+  const reflection = document.getElementById("reflectionModal");
+  if (reflection && !reflection.classList.contains("hidden")) {
+    reflection.classList.add("hidden");
+    try {
+      reflectionPromptActive = false;
+    } catch {}
+    return true;
+  }
+
+  const pomodoro = document.getElementById("pomodoroModal");
+  if (pomodoro && !pomodoro.classList.contains("hidden")) {
+    if (typeof closePomodoroTimer === "function") closePomodoroTimer();
+    else pomodoro.classList.add("hidden");
+    return true;
+  }
+
+  const countdown = document.getElementById("countdownOverlay");
+  if (countdown && !countdown.classList.contains("hidden")) {
+    countdown.classList.add("hidden");
+    return true;
+  }
+
+  const settings = document.getElementById("settingsPanel");
+  if (settings && !settings.classList.contains("hidden")) {
+    settings.classList.add("hidden");
+    return true;
+  }
+
+  return false;
+}
+
+function startFocusTimerForSelectedTask() {
+  const selectedId = getSelectedTaskForShortcuts();
+  const fallbackId = selectedId || (state.tasks || []).find((t) => !t.completed)?.id || null;
+  if (!fallbackId) {
+    showToast("Select a task first, then press F.");
+    return;
+  }
+  setSelectedTaskForShortcuts(fallbackId);
+  if (typeof openPomodoroTimer === "function") {
+    openPomodoroTimer(fallbackId);
+  }
+}
+
+function initGlobalKeyboardShortcuts() {
+  if (axisHotkeysInitialized) return;
+  axisHotkeysInitialized = true;
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      // Let the command palette handle its own navigation keys.
+      if (window.AxisKeyboardShortcuts?.isCommandPaletteOpen?.()) {
+        if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(e.key)) {
+          const input = document.getElementById("commandPaletteInput");
+          if (input && document.activeElement !== input) input.focus();
+        }
+      }
+
+      const key = String(e.key || "");
+      const lower = key.toLowerCase();
+      const meta = e.metaKey || e.ctrlKey;
+
+      // Escape closes any open modal (even if focused in an input).
+      if (lower === "escape") {
+        if (closeAnyOpenModal()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+
+      // Command palette + modal shortcuts.
+      if (meta && (lower === "k" || e.code === "KeyK")) {
+        e.preventDefault();
+        window.AxisKeyboardShortcuts?.openCommandPalette?.();
+        return;
+      }
+      if (meta && (lower === "n" || e.code === "KeyN")) {
+        const hasDashboard = Boolean(document.getElementById("dashboard"));
+        if (hasDashboard && typeof openTaskEditor === "function") {
+          e.preventDefault();
+          openTaskEditor(null);
+        }
+        return;
+      }
+      if (meta && (lower === "g" || e.code === "KeyG")) {
+        const hasDashboard = Boolean(document.getElementById("dashboard"));
+        if (hasDashboard && typeof openAddGoalModal === "function") {
+          e.preventDefault();
+          openAddGoalModal();
+        }
+        return;
+      }
+      if (meta && (key === "/" || e.code === "Slash")) {
+        e.preventDefault();
+        window.AxisKeyboardShortcuts?.openShortcutsHelp?.();
+        return;
+      }
+
+      // Plain keys (ignore while typing).
+      if (axisIsEditableTarget(e.target)) return;
+      if (e.altKey || e.metaKey || e.ctrlKey) return;
+
+      if (lower === "t") {
+        e.preventDefault();
+        toggleTheme();
+        return;
+      }
+      if (lower === "f") {
+        e.preventDefault();
+        startFocusTimerForSelectedTask();
+      }
+    },
+    true,
+  );
+}
+
+initGlobalKeyboardShortcuts();
+
 const PRIORITY_WEIGHTS = {
   "Urgent & Important": 1,
   "Urgent, Not Important": 2,
@@ -236,6 +423,7 @@ function getAuthHeaders() {
 
 async function loadUserData() {
   try {
+    showDashboardSkeletons();
     const token = getAuthToken();
     if (!token) return false;
 
@@ -475,6 +663,165 @@ function showToast(message) {
   console.log("[Axis]", message);
 }
 
+// ---------- Skeleton Loading (Phase 2A) ----------
+
+function isDashboardPage() {
+  return Boolean(document.getElementById("dashboard"));
+}
+
+function setSkeletonContent(container, html) {
+  if (!container) return;
+  container.dataset.axisSkeleton = "1";
+  container.setAttribute("aria-busy", "true");
+  container.innerHTML = html;
+}
+
+function clearSkeleton(container) {
+  if (!container) return;
+  container.removeAttribute("aria-busy");
+  delete container.dataset.axisSkeleton;
+}
+
+function showTaskListSkeleton() {
+  const container = document.getElementById("taskList");
+  if (!container || container.dataset.axisSkeleton === "1") return;
+
+  const widths = [78, 64, 72, 58, 68];
+  const items = widths
+    .map(
+      (w) => `
+        <div class="task-item" aria-hidden="true">
+          <div class="task-checkbox">
+            <div class="skeleton-loading skeleton-circle"></div>
+          </div>
+          <div class="task-content">
+            <div class="task-title">
+              <div class="skeleton-loading skeleton-text" style="width: ${w}%"></div>
+            </div>
+            <div class="task-meta" style="gap: 10px; flex-wrap: wrap;">
+              <div class="skeleton-loading skeleton-text" style="width: 120px"></div>
+              <div class="skeleton-loading skeleton-text" style="width: 160px"></div>
+              <div class="skeleton-loading skeleton-text" style="width: 44px"></div>
+            </div>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+
+  setSkeletonContent(container, items);
+}
+
+function showGoalsListSkeleton() {
+  const container = document.getElementById("goalsList");
+  if (!container || container.dataset.axisSkeleton === "1") return;
+
+  setSkeletonContent(
+    container,
+    `
+      <div class="goals-level-section" aria-hidden="true">
+        <div class="goals-level-header"><div class="skeleton-loading skeleton-text" style="width: 90px"></div></div>
+        <div class="goal-item" style="border-left-color: transparent;">
+          <div class="goal-content"><div class="skeleton-loading skeleton-text" style="width: 78%"></div></div>
+        </div>
+        <div class="goal-item" style="border-left-color: transparent;">
+          <div class="goal-content"><div class="skeleton-loading skeleton-text" style="width: 62%"></div></div>
+        </div>
+      </div>
+      <div class="goals-level-section" aria-hidden="true">
+        <div class="goals-level-header"><div class="skeleton-loading skeleton-text" style="width: 70px"></div></div>
+        <div class="goal-item" style="border-left-color: transparent;">
+          <div class="goal-content"><div class="skeleton-loading skeleton-text" style="width: 68%"></div></div>
+        </div>
+        <div class="goal-item" style="border-left-color: transparent;">
+          <div class="goal-content"><div class="skeleton-loading skeleton-text" style="width: 54%"></div></div>
+        </div>
+      </div>
+    `,
+  );
+}
+
+function showCalendarSkeleton() {
+  const container = document.getElementById("calendarContainer");
+  if (!container) return;
+
+  setSkeletonContent(
+    container,
+    `
+      <div class="calendar-inner" aria-hidden="true">
+        <div style="padding: 18px; display: grid; gap: 12px;">
+          <div class="skeleton-loading skeleton-text" style="width: 52%"></div>
+          <div class="skeleton-loading skeleton-block"></div>
+          <div class="skeleton-loading skeleton-block"></div>
+          <div class="skeleton-loading skeleton-block"></div>
+          <div class="skeleton-loading skeleton-text" style="width: 38%"></div>
+        </div>
+      </div>
+    `,
+  );
+}
+
+function showAnalyticsSkeleton() {
+  const statIds = ["statTotalTasks", "statCompletedTasks", "statCompletionRate"];
+  statIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!el.dataset.axisSkeletonTextSaved) {
+      el.dataset.axisSkeletonTextSaved = el.textContent || "";
+    }
+    el.textContent = "";
+    el.classList.add("skeleton-loading", "skeleton-text");
+    el.style.display = "inline-block";
+    el.style.width = "54px";
+  });
+
+  const containers = ["priorityDistribution", "categoryBreakdown", "weeklyProgress"];
+  containers.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = `
+      <div class="distribution-bar" aria-hidden="true">
+        <span class="distribution-bar-label"><span class="skeleton-loading skeleton-text" style="width: 70px; display: inline-block;"></span></span>
+        <div class="distribution-bar-track">
+          <div class="distribution-bar-fill" style="width: 60%; background: transparent;">
+            <div class="skeleton-loading skeleton-text" style="width: 100%; height: 8px; border-radius: 999px;"></div>
+          </div>
+        </div>
+        <span class="distribution-bar-value"><span class="skeleton-loading skeleton-text" style="width: 20px; display: inline-block;"></span></span>
+      </div>
+      <div class="distribution-bar" aria-hidden="true">
+        <span class="distribution-bar-label"><span class="skeleton-loading skeleton-text" style="width: 54px; display: inline-block;"></span></span>
+        <div class="distribution-bar-track">
+          <div class="distribution-bar-fill" style="width: 40%; background: transparent;">
+            <div class="skeleton-loading skeleton-text" style="width: 100%; height: 8px; border-radius: 999px;"></div>
+          </div>
+        </div>
+        <span class="distribution-bar-value"><span class="skeleton-loading skeleton-text" style="width: 20px; display: inline-block;"></span></span>
+      </div>
+    `;
+  });
+}
+
+function clearAnalyticsSkeleton() {
+  const statIds = ["statTotalTasks", "statCompletedTasks", "statCompletionRate"];
+  statIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove("skeleton-loading", "skeleton-text");
+    el.style.display = "";
+    el.style.width = "";
+    delete el.dataset.axisSkeletonTextSaved;
+  });
+}
+
+function showDashboardSkeletons() {
+  if (!isDashboardPage()) return;
+  showGoalsListSkeleton();
+  showTaskListSkeleton();
+  showCalendarSkeleton();
+  showAnalyticsSkeleton();
+}
+
 // ---------- Pomodoro Timer ----------
 
 let pomodoroTimer = null;
@@ -584,6 +931,11 @@ function startPomodoroTimer() {
       $("#pomodoroStatus").textContent = "Time's up! Great work! 🎉";
       $("#pomodoroStartBtn").classList.remove("hidden");
       $("#pomodoroPauseBtn").classList.add("hidden");
+
+      try {
+        const task = state.tasks.find((t) => t.id === currentTaskId);
+        window.AxisNotifications?.onFocusComplete?.(task);
+      } catch {}
       
       // Play notification sound (if available) or just show alert
       if (typeof Audio !== 'undefined') {
@@ -881,6 +1233,7 @@ saveUserData = async function() {
 // Override loadUserData for guest mode to use localStorage only
 const originalLoadUserData = loadUserData;
 loadUserData = async function() {
+  showDashboardSkeletons();
   const token = getAuthToken();
   
   // Check if in guest mode
@@ -1567,6 +1920,7 @@ function renderEisenhowerMatrix() {
       const checkbox = taskItem.querySelector(".quadrant-task-checkbox");
       if (checkbox) {
         const taskId = checkbox.dataset.id;
+        setSelectedTaskForShortcuts(taskId);
         openPomodoroTimer(taskId);
       }
     }
@@ -1611,6 +1965,10 @@ function showHabitNotification(habit) {
   // Remove any existing notification
   const existing = document.querySelector(".habit-notification");
   if (existing) existing.remove();
+
+  try {
+    window.AxisNotifications?.onHabitDue?.(habit);
+  } catch {}
   
   // Create in-page notification
   const notification = document.createElement("div");
@@ -2338,6 +2696,10 @@ function initTaskEditorModal() {
         state.tasks.push(newTask);
       }
 
+      try {
+        window.AxisNotifications?.maybeRequestPermissionForDeadlines?.(true);
+      } catch {}
+
       saveUserData();
       renderTasks();
       renderTaskSummary();
@@ -2736,6 +3098,7 @@ function deleteGoal(goalId) {
 async function renderGoals() {
   const container = $("#goalsList");
   if (!container) return;
+  clearSkeleton(container);
   
   container.innerHTML = "";
   
@@ -2768,6 +3131,7 @@ async function renderGoals() {
     levelGoals.forEach(goal => {
       const goalItem = document.createElement("div");
       goalItem.className = "goal-item";
+      goalItem.dataset.goalId = goal.id;
       goalItem.style.borderLeftColor = goal.color?.border || goal.color?.text || "#22c55e";
       
       const goalContent = document.createElement("div");
@@ -3903,6 +4267,7 @@ function renderDailyHabits() {
   sortedHabits.forEach(habit => {
     const habitItem = document.createElement("div");
     habitItem.className = "habit-item";
+    habitItem.dataset.habitId = habit.id;
     habitItem.innerHTML = `
       <div style="flex: 1;">
         <span class="habit-name">${habit.name}</span>
@@ -3987,6 +4352,7 @@ function deleteTask(taskId) {
   $("#planTasksBtn").disabled = state.tasks.length === 0;
 }
 
+let scheduleRegenTimeout = null;
 function regenerateScheduleAndRender() {
   if (!state.profile) {
     state.schedule = [];
@@ -3995,14 +4361,22 @@ function regenerateScheduleAndRender() {
     return;
   }
 
-  rankTasks();
-  generateSchedule();
-  renderSchedule();
+  showCalendarSkeleton();
+  if (scheduleRegenTimeout) {
+    clearTimeout(scheduleRegenTimeout);
+  }
+  scheduleRegenTimeout = setTimeout(() => {
+    scheduleRegenTimeout = null;
+    rankTasks();
+    generateSchedule();
+    renderSchedule();
+  }, 0);
 }
 
 function renderTasks() {
   const container = $("#taskList");
   if (!container) return;
+  clearSkeleton(container);
   container.innerHTML = "";
 
   const tasks = [...state.tasks];
@@ -4066,7 +4440,10 @@ function renderTasks() {
     const editBtn = e.target.closest(".task-edit-btn");
     if (editBtn) {
       const id = editBtn.dataset.id;
-      if (id) startEditTask(id);
+      if (id) {
+        setSelectedTaskForShortcuts(id);
+        startEditTask(id);
+      }
       e.stopPropagation();
       return;
     }
@@ -4090,7 +4467,10 @@ function renderTasks() {
     const taskEl = e.target.closest(".task-item");
     if (taskEl) {
       const id = taskEl.querySelector(".checkbox-fancy")?.dataset.id;
-      if (id) openPomodoroTimer(id);
+      if (id) {
+        setSelectedTaskForShortcuts(id);
+        openPomodoroTimer(id);
+      }
     }
   };
 }
@@ -4240,8 +4620,7 @@ function initWizardButtons() {
         alert("Please complete your profile and tasks first.");
         return;
       }
-      generateSchedule();
-      renderSchedule();
+      regenerateScheduleAndRender();
       $("#calendarSubtitle").textContent =
         "Your tasks are time‑blocked so everything finishes before the deadline. You can click blocks to adjust or start focus.";
       // Close wizard after schedule is generated
@@ -4878,6 +5257,7 @@ function initCalendarViewToggle() {
 function renderSchedule() {
   const container = $("#calendarContainer");
   if (!container) return;
+  clearSkeleton(container);
 
   if ((!state.schedule || state.schedule.length === 0) &&
       (!state.fixedBlocks || state.fixedBlocks.length === 0)) {
@@ -5486,6 +5866,7 @@ function onCalendarBlockClick(block) {
   if (!block.taskId) return;
 
   // Open Pomodoro timer for task blocks
+  setSelectedTaskForShortcuts(block.taskId);
   openPomodoroTimer(block.taskId);
 }
 
@@ -5736,6 +6117,9 @@ function checkReflectionDue() {
       
       // Only prompt if we've reached or passed the due date
       if (now >= nextDueDate) {
+        try {
+          window.AxisNotifications?.onReflectionDue?.("weekly");
+        } catch {}
         showReflectionPrompt("weekly");
         return;
       }
@@ -5746,6 +6130,9 @@ function checkReflectionDue() {
       const dueDate = new Date(state.firstReflectionDueDate);
       // Only prompt if we've reached or passed the due date
       if (now >= dueDate) {
+        try {
+          window.AxisNotifications?.onReflectionDue?.("weekly");
+        } catch {}
         showReflectionPrompt("weekly");
         return;
       }
@@ -5776,6 +6163,9 @@ function checkReflectionDue() {
       
       // Only prompt if we've reached or passed the due date
       if (now >= nextDueDate) {
+        try {
+          window.AxisNotifications?.onReflectionDue?.("monthly");
+        } catch {}
         showReflectionPrompt("monthly");
         return;
       }
@@ -5919,6 +6309,7 @@ function initAnalytics() {
 }
 
 function renderAnalytics() {
+  clearAnalyticsSkeleton();
   const tasks = state.tasks || [];
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter(t => t.completed).length;
@@ -6428,7 +6819,7 @@ function restoreFromState() {
     renderGoals();
     updateCategoryDropdown();
   }
-  if (state.tasks?.length) {
+  if (state.tasks) {
     renderTasks();
     renderTaskSummary();
   }

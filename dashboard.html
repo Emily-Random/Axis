@@ -33,6 +33,29 @@
           <span class="logo-text-dashboard">Dashboard</span>
         </div>
         <div class="header-actions">
+          <button id="commandPaletteBtn" type="button" class="btn-icon command-palette-btn" title="Search (Ctrl/Cmd+K)" aria-label="Open command palette">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M21 21l-4.3-4.3"></path>
+            </svg>
+            <span class="shortcut-hint" aria-hidden="true">⌘K</span>
+          </button>
+          <div class="notification-wrapper">
+            <button id="notificationBtn" type="button" class="btn-icon notification-btn" title="Notifications" aria-label="Notifications">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              <span id="notificationBadge" class="notification-badge hidden" aria-hidden="true">0</span>
+            </button>
+            <div id="notificationDropdown" class="notification-dropdown hidden" role="menu" aria-label="Notifications">
+              <div class="notification-dropdown-header">
+                <span>Notifications</span>
+                <button type="button" id="clearNotificationsBtn" class="btn btn-ghost btn-sm">Clear</button>
+              </div>
+              <div id="notificationList" class="notification-list"></div>
+            </div>
+          </div>
           <button type="button" class="btn-icon theme-toggle" data-theme-toggle aria-label="Toggle theme" title="Toggle theme">
             <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/>
@@ -67,7 +90,7 @@
             <h2>Goals Hierarchy</h2>
             <span class="panel-subtitle">Your goals across different timeframes</span>
               </div>
-              <button id="addGoalBtn" class="btn btn-secondary btn-sm">+ Add goal</button>
+              <button id="addGoalBtn" class="btn btn-secondary btn-sm">+ Add goal <span class="shortcut-hint-inline" aria-hidden="true">⌘G</span></button>
             </div>
           </div>
           <div class="goals-content">
@@ -151,7 +174,7 @@
                   </svg>
                 </button>
                 <button type="button" id="addTaskBtn" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.75rem;" title="Add new task">
-                  + Add Task
+                  + Add Task <span class="shortcut-hint-inline" aria-hidden="true">⌘N</span>
                 </button>
               </div>
             </div>
@@ -547,6 +570,7 @@
             <button class="settings-tab" data-tab="account">Account</button>
             <button class="settings-tab" data-tab="goals">Goals</button>
             <button class="settings-tab" data-tab="blocking">Focus & Blocking</button>
+            <button class="settings-tab" data-tab="notifications">Notifications</button>
             <button class="settings-tab" data-tab="reflections">Reflections</button>
             <button class="settings-tab" data-tab="data">Data</button>
           </div>
@@ -639,6 +663,51 @@
             <div style="display: flex; gap: 12px; margin-top: 16px;">
               <button id="addBlockingRuleBtn" class="btn btn-secondary">+ Add Rule</button>
               <button id="addCommonRulesBtn" class="btn btn-ghost">Add Common Sites</button>
+            </div>
+          </div>
+
+          <!-- Notifications Settings -->
+          <div id="settingsNotifications" class="settings-section">
+            <h3>Notifications</h3>
+            <p class="settings-description">
+              Choose what Axis should remind you about while this tab is open. Browser notifications require permission.
+            </p>
+
+            <div class="notification-settings">
+              <label class="toggle-row">
+                <input type="checkbox" id="notifBrowserEnabled" />
+                <span>Enable browser notifications</span>
+              </label>
+
+              <div class="notification-settings-grid">
+                <label class="toggle-row">
+                  <input type="checkbox" id="notifDeadlines" />
+                  <span>Task deadlines (1 hour / 15 min before)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="notifSchedule" />
+                  <span>Schedule block starting</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="notifHabits" />
+                  <span>Daily habit reminders</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="notifFocus" />
+                  <span>Focus timer completion</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="notifReflections" />
+                  <span>Weekly reflection due</span>
+                </label>
+              </div>
+
+              <div style="display: flex; gap: 12px; align-items: center; margin-top: 16px; flex-wrap: wrap;">
+                <button type="button" id="requestNotificationPermissionBtn" class="btn btn-secondary btn-sm">
+                  Request Permission
+                </button>
+                <span id="notifPermissionStatus" class="settings-description" style="margin: 0;">Permission: —</span>
+              </div>
             </div>
           </div>
 
@@ -742,6 +811,45 @@
                 Clear Schedule
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Command Palette -->
+      <div id="commandPaletteModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+        <div class="modal-overlay"></div>
+        <div class="modal-content command-palette-content">
+          <div class="command-palette-input-row">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M21 21l-4.3-4.3"></path>
+            </svg>
+            <input id="commandPaletteInput" type="text" placeholder="Search tasks, goals, habits..." autocomplete="off" />
+            <span class="command-palette-kbd" aria-hidden="true">Esc</span>
+          </div>
+          <div id="commandPaletteList" class="command-palette-list"></div>
+          <div class="command-palette-footer">
+            <span class="command-palette-footer-hint">↑↓ to navigate · Enter to select · Esc to close</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shortcuts Help Modal -->
+      <div id="shortcutsHelpModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-content-large">
+          <div class="modal-header">
+            <h2>Keyboard Shortcuts</h2>
+            <button id="closeShortcutsHelpBtn" class="btn-icon" title="Close">×</button>
+          </div>
+          <div class="shortcuts-grid">
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>K</kbd></span><span class="shortcut-desc">Command palette</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>N</kbd></span><span class="shortcut-desc">New task</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>G</kbd></span><span class="shortcut-desc">New goal</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>/</kbd></span><span class="shortcut-desc">Show shortcuts</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>Esc</kbd></span><span class="shortcut-desc">Close open modal</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>T</kbd></span><span class="shortcut-desc">Toggle theme</span></div>
+            <div class="shortcut-row"><span class="shortcut-keys"><kbd>F</kbd></span><span class="shortcut-desc">Start focus timer for selected task</span></div>
           </div>
         </div>
       </div>
@@ -924,6 +1032,9 @@
   </div>
 
   <script src="script.js"></script>
+  <script src="js/modules/keyboard-shortcuts.js"></script>
+  <script src="js/modules/notifications.js"></script>
+  <script src="js/modules/onboarding-tour.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>
