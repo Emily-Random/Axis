@@ -2032,6 +2032,12 @@ function initLandingPage() {
   initLandingReveals();
 
   // Landing page button handlers
+  // Settings button - redirects to login since settings require authentication
+  $('#landingSettingsBtn')?.addEventListener('click', () => {
+    showView('authScreen');
+    $('.auth-tab[data-tab="login"]').click();
+  });
+
   // "Get Started" buttons go to signup tab
   $('#landingGetStartedBtn').addEventListener('click', () => {
     showView('authScreen');
