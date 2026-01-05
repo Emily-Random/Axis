@@ -24,23 +24,23 @@ export class WebsiteBlocker {
         position: fixed;
         bottom: 24px;
         left: 24px;
-        background: #c8103c;
+        background: linear-gradient(135deg, #c8103c, #e11d48);
         color: white;
         padding: 12px 18px;
         border-radius: 12px;
         font-size: 0.85rem;
         font-weight: 600;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 24px rgba(200, 16, 60, 0.3);
         z-index: 9000;
         display: flex;
         align-items: center;
         gap: 10px;
         cursor: pointer;
-        transition: opacity var(--transition-fast, 0.15s ease), background-color var(--transition-fast, 0.15s ease);
+        transition: transform 0.2s, box-shadow 0.2s;
       }
       .blocker-badge:hover {
-        opacity: 0.9;
-        background-color: #a10d32;
+        transform: translateY(-2px);
+        box-shadow: 0 12px 32px rgba(200, 16, 60, 0.4);
       }
       .blocker-badge-icon {
         font-size: 1.2rem;
@@ -144,15 +144,16 @@ export class WebsiteBlocker {
         font-size: 1rem;
         font-weight: 600;
         cursor: pointer;
-        transition: opacity 0.15s ease, background-color 0.15s ease;
+        transition: transform 0.2s, box-shadow 0.2s;
         border: none;
       }
       .blocked-btn:hover {
-        opacity: 0.9;
+        transform: translateY(-2px);
       }
       .blocked-btn-primary {
         background: #c8103c;
         color: white;
+        box-shadow: 0 8px 24px rgba(200, 16, 60, 0.4);
       }
       .blocked-btn-secondary {
         background: rgba(255,255,255,0.1);
