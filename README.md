@@ -50,7 +50,7 @@ Axis is a web-based student planning application that generates a personalized, 
 
 - Configure environment variables:
   - Copy `.env.example` → `.env`
-  - Set `JWT_SECRET` and your `DEEPSEEK_API_KEY`
+  - Set `JWT_SECRET`, pick an `AI_PROVIDER`, and set the matching API key (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
 
 - Start the server:
   - `npm run dev`

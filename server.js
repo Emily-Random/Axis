@@ -1,5 +1,5 @@
-// Simple Node/Express backend for Axis chatbot using DeepSeek API
-// IMPORTANT: Do NOT hard-code your API key here. Use the DEEPSEEK_API_KEY environment variable.
+// Simple Node/Express backend for Axis (multi-LLM: DeepSeek/OpenAI/Gemini).
+// IMPORTANT: Do NOT hard-code API keys here. Use environment variables.
 
 const express = require("express");
 const cors = require("cors");
@@ -36,33 +36,142 @@ function maskApiKey(key) {
   return `${key.slice(0, 3)}…${key.slice(-4)}`;
 }
 
+function normalizeProvider(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (!v) return "deepseek";
+  if (v === "gpt") return "openai";
+  if (v === "google") return "gemini";
+  return v;
+}
+
+const AI_PROVIDER = normalizeProvider(process.env.AI_PROVIDER || process.env.LLM_PROVIDER || "deepseek");
+const ACTIVE_PROVIDER = new Set(["deepseek", "openai", "gemini"]).has(AI_PROVIDER)
+  ? AI_PROVIDER
+  : "deepseek";
+
+if (ACTIVE_PROVIDER !== AI_PROVIDER) {
+  console.warn(`⚠️  WARNING: Unknown AI_PROVIDER "${AI_PROVIDER}". Falling back to "deepseek".`);
+}
+
 const DEEPSEEK_API_KEY = normalizeApiKey(process.env.DEEPSEEK_API_KEY);
 const DEEPSEEK_BASE_URL =
   (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1/chat/completions").trim();
 const DEEPSEEK_MODEL = (process.env.DEEPSEEK_MODEL || "deepseek-chat").trim();
 
-if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY === "your_deepseek_api_key_here") {
-  console.warn(
-    "⚠️  WARNING: DEEPSEEK_API_KEY is not set or still has placeholder value.",
-  );
-  console.warn(
-    "   Please edit the .env file and add your actual DeepSeek API key.",
-  );
-  console.warn(
-    "   Get your API key from: https://platform.deepseek.com/",
-  );
-  console.warn(
-    "   DEEPSEEK_API_KEY: ", maskApiKey(DEEPSEEK_API_KEY),
-  );
+const OPENAI_API_KEY = normalizeApiKey(process.env.OPENAI_API_KEY);
+const OPENAI_BASE_URL =
+  (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1/chat/completions").trim();
+const OPENAI_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+
+const GEMINI_API_KEY = normalizeApiKey(process.env.GEMINI_API_KEY);
+const GEMINI_BASE_URL =
+  (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").trim();
+const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
+
+function isPlaceholderKey(key) {
+  if (!key) return true;
+  const v = String(key).trim();
+  return [
+    "your_deepseek_api_key_here",
+    "your_openai_api_key_here",
+    "your_gemini_api_key_here",
+  ].includes(v);
 }
 
-// ---------- DeepSeek helpers ----------
+function warnIfMissingProviderKey() {
+  const providerToKey = {
+    deepseek: DEEPSEEK_API_KEY,
+    openai: OPENAI_API_KEY,
+    gemini: GEMINI_API_KEY,
+  };
+  const key = providerToKey[ACTIVE_PROVIDER];
+  if (!key || isPlaceholderKey(key)) {
+    const envVar =
+      ACTIVE_PROVIDER === "deepseek"
+        ? "DEEPSEEK_API_KEY"
+        : ACTIVE_PROVIDER === "openai"
+          ? "OPENAI_API_KEY"
+          : "GEMINI_API_KEY";
+    console.warn(`⚠️  WARNING: ${envVar} is not set (AI_PROVIDER=${ACTIVE_PROVIDER}).`);
+    console.warn("   Please edit your .env file and add an API key.");
+  }
+}
+
+warnIfMissingProviderKey();
+
+// ---------- AI helpers ----------
 function safeParseJSON(text) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
   try {
-    return JSON.parse(text);
+    return JSON.parse(trimmed);
+  } catch {
+    // Continue
+  }
+
+  const extracted = extractFirstJsonValue(trimmed);
+  if (!extracted) return null;
+  try {
+    return JSON.parse(extracted);
   } catch {
     return null;
   }
+}
+
+function extractFirstJsonValue(text) {
+  const startObj = text.indexOf("{");
+  const startArr = text.indexOf("[");
+  if (startObj === -1 && startArr === -1) return "";
+
+  const start =
+    startArr !== -1 && (startObj === -1 || startArr < startObj) ? startArr : startObj;
+
+  const stack = [text[start]];
+  let inString = false;
+  let escape = false;
+
+  for (let i = start + 1; i < text.length; i += 1) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{" || ch === "[") {
+      stack.push(ch);
+      continue;
+    }
+
+    if (ch === "}" || ch === "]") {
+      const open = stack[stack.length - 1];
+      const matches = (open === "{" && ch === "}") || (open === "[" && ch === "]");
+      if (!matches) continue;
+      stack.pop();
+      if (stack.length === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return "";
 }
 
 // ---------- iCalendar (.ics) helpers ----------
@@ -197,19 +306,23 @@ function buildAxisIcs({ userId, data, options }) {
   return `${lines.join("\r\n")}\r\n`;
 }
 
-async function callDeepSeek({
+async function callOpenAiCompatible({
+  apiKey,
+  baseUrl,
+  model,
   system,
   user,
   temperature = 0.35,
   maxTokens = 900,
   expectJSON = false,
+  providerLabel = "LLM",
 }) {
-  if (!DEEPSEEK_API_KEY) {
-    throw new Error("DEEPSEEK_API_KEY is not configured on the server.");
+  if (!apiKey || isPlaceholderKey(apiKey)) {
+    throw new Error(`${providerLabel} API key is not configured on the server.`);
   }
 
   const payload = {
-    model: DEEPSEEK_MODEL,
+    model,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -218,37 +331,215 @@ async function callDeepSeek({
     max_tokens: maxTokens,
   };
 
-  // DeepSeek supports OpenAI-style response_format on newer models
   if (expectJSON) {
     payload.response_format = { type: "json_object" };
   }
 
-  const response = await fetch(DEEPSEEK_BASE_URL, {
+  const response = await fetch(baseUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    console.error("DeepSeek API error:", response.status, text);
-    let errorMessage = "Upstream DeepSeek API error.";
+    console.error(`${providerLabel} API error:`, response.status, text);
+    let errorMessage = `Upstream ${providerLabel} API error.`;
     const parsed = safeParseJSON(text);
     if (parsed?.error?.message) {
       errorMessage = parsed.error.message;
     }
+
+    const shouldRetryWithoutResponseFormat =
+      expectJSON &&
+      payload.response_format &&
+      /response[_ -]?format|json[_ -]?object|unknown parameter|unsupported/i.test(
+        `${errorMessage}\n${text}`,
+      );
+
+    if (shouldRetryWithoutResponseFormat) {
+      const retryPayload = { ...payload };
+      delete retryPayload.response_format;
+
+      const retryResponse = await fetch(baseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(retryPayload),
+      });
+
+      if (retryResponse.ok) {
+        const retryData = await retryResponse.json();
+        const reply = retryData.choices?.[0]?.message?.content;
+        if (!reply) {
+          throw new Error(`${providerLabel} reply missing content`);
+        }
+        return reply.trim();
+      }
+
+      const retryText = await retryResponse.text();
+      console.error(`${providerLabel} retry API error:`, retryResponse.status, retryText);
+      const retryParsed = safeParseJSON(retryText);
+      const retryMessage = retryParsed?.error?.message || `Upstream ${providerLabel} API error.`;
+      throw new Error(`${retryMessage} (status ${retryResponse.status})`);
+    }
+
     throw new Error(`${errorMessage} (status ${response.status})`);
   }
 
   const data = await response.json();
   const reply = data.choices?.[0]?.message?.content;
   if (!reply) {
-    throw new Error("DeepSeek reply missing content");
+    throw new Error(`${providerLabel} reply missing content`);
   }
   return reply.trim();
+}
+
+async function callGemini({
+  apiKey,
+  baseUrl,
+  model,
+  system,
+  user,
+  temperature = 0.35,
+  maxTokens = 900,
+  expectJSON = false,
+}) {
+  if (!apiKey || isPlaceholderKey(apiKey)) {
+    throw new Error("GEMINI_API_KEY is not configured on the server.");
+  }
+
+  const base = String(baseUrl || "").replace(/\/$/, "");
+  const url = `${base}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const payload = {
+    ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+    contents: [{ role: "user", parts: [{ text: user }] }],
+    generationConfig: {
+      temperature,
+      maxOutputTokens: maxTokens,
+      ...(expectJSON ? { responseMimeType: "application/json" } : {}),
+    },
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error("Gemini API error:", response.status, text);
+    let errorMessage = "Upstream Gemini API error.";
+    const parsed = safeParseJSON(text);
+    if (parsed?.error?.message) {
+      errorMessage = parsed.error.message;
+    }
+
+    const shouldRetryWithoutResponseMimeType =
+      expectJSON &&
+      payload?.generationConfig?.responseMimeType &&
+      /responsemime|response_mime|unknown|unsupported|invalid argument/i.test(`${errorMessage}\n${text}`);
+
+    if (shouldRetryWithoutResponseMimeType) {
+      const retryPayload = {
+        ...payload,
+        generationConfig: { ...payload.generationConfig },
+      };
+      delete retryPayload.generationConfig.responseMimeType;
+
+      const retryResponse = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(retryPayload),
+      });
+
+      if (retryResponse.ok) {
+        const retryData = await retryResponse.json();
+        const parts = retryData?.candidates?.[0]?.content?.parts;
+        const reply = Array.isArray(parts)
+          ? parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("")
+          : "";
+        if (!reply) {
+          throw new Error("Gemini reply missing content");
+        }
+        return reply.trim();
+      }
+
+      const retryText = await retryResponse.text();
+      console.error("Gemini retry API error:", retryResponse.status, retryText);
+      const retryParsed = safeParseJSON(retryText);
+      const retryMessage = retryParsed?.error?.message || "Upstream Gemini API error.";
+      throw new Error(`${retryMessage} (status ${retryResponse.status})`);
+    }
+
+    throw new Error(`${errorMessage} (status ${response.status})`);
+  }
+
+  const data = await response.json();
+  const parts = data?.candidates?.[0]?.content?.parts;
+  const reply = Array.isArray(parts)
+    ? parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("")
+    : "";
+  if (!reply) {
+    throw new Error("Gemini reply missing content");
+  }
+  return reply.trim();
+}
+
+async function callLLM({ system, user, temperature = 0.35, maxTokens = 900, expectJSON = false }) {
+  if (ACTIVE_PROVIDER === "deepseek") {
+    return callOpenAiCompatible({
+      apiKey: DEEPSEEK_API_KEY,
+      baseUrl: DEEPSEEK_BASE_URL,
+      model: DEEPSEEK_MODEL,
+      system,
+      user,
+      temperature,
+      maxTokens,
+      expectJSON,
+      providerLabel: "DeepSeek",
+    });
+  }
+
+  if (ACTIVE_PROVIDER === "openai") {
+    return callOpenAiCompatible({
+      apiKey: OPENAI_API_KEY,
+      baseUrl: OPENAI_BASE_URL,
+      model: OPENAI_MODEL,
+      system,
+      user,
+      temperature,
+      maxTokens,
+      expectJSON,
+      providerLabel: "OpenAI",
+    });
+  }
+
+  if (ACTIVE_PROVIDER === "gemini") {
+    return callGemini({
+      apiKey: GEMINI_API_KEY,
+      baseUrl: GEMINI_BASE_URL,
+      model: GEMINI_MODEL,
+      system,
+      user,
+      temperature,
+      maxTokens,
+      expectJSON,
+    });
+  }
+
+  throw new Error(`Unknown AI provider: ${ACTIVE_PROVIDER}`);
 }
 
 async function generateAiRescheduleBlocks({
@@ -335,7 +626,7 @@ Current schedule (may be ignored): ${JSON.stringify(scheduleBrief).slice(0, 6000
 Profile: ${JSON.stringify(profileBrief).slice(0, 2000)}
 `.trim();
 
-  const reply = await callDeepSeek({
+  const reply = await callLLM({
     system: "You are a time-blocking assistant. Return strict JSON only.",
     user: userPrompt,
     temperature: 0.25,
@@ -648,7 +939,7 @@ async function runAxisAssistantAgent({ userId, message }) {
       .filter(Boolean)
       .join("\n\n");
 
-    const raw = await callDeepSeek({
+    const raw = await callLLM({
       system: systemPrompt,
       user: userPrompt,
       temperature: 0.2,
@@ -1465,7 +1756,7 @@ app.get("/api/user/info", authenticateToken, async (req, res) => {
   }
 });
 
-// ---------- AI Planning Endpoints (DeepSeek-powered) ----------
+// ---------- AI Planning Endpoints (LLM-powered) ----------
 
 app.post("/api/ai/task-priority", async (req, res) => {
   try {
@@ -1498,7 +1789,7 @@ User says urgent: ${normalizedUrgentHint || "unknown"}
 User says important: ${normalizedImportantHint || "unknown"}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are an AI planner. Return strict JSON only.",
       user: userPrompt,
       temperature: 0.2,
@@ -1537,7 +1828,7 @@ Tasks: ${JSON.stringify(tasks).slice(0, 6000)}
 Profile: ${JSON.stringify(profile).slice(0, 2000)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are an AI planner. Be concise and return strict JSON.",
       user: userPrompt,
       temperature: 0.2,
@@ -1573,7 +1864,7 @@ Fixed blocks: ${JSON.stringify(fixedBlocks).slice(0, 3000)}
 Productive windows: ${JSON.stringify(productiveWindows).slice(0, 1500)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are a time-blocking assistant. Return valid JSON only.",
       user: userPrompt,
       temperature: 0.25,
@@ -1615,7 +1906,7 @@ Reflections: ${JSON.stringify(reflections).slice(0, 5000)}
 Goals: ${JSON.stringify(goals).slice(0, 3000)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are a concise coach. JSON only.",
       user: userPrompt,
       temperature: 0.3,
@@ -1639,7 +1930,7 @@ Return JSON only: {"plan":"short guidance","suggestedTasks":["taskId",...],"brea
 Tasks: ${JSON.stringify(tasks).slice(0, 3000)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are an emotion-aware study coach. JSON only.",
       user: userPrompt,
       temperature: 0.35,
@@ -1664,7 +1955,7 @@ Goals: ${JSON.stringify(goals).slice(0, 2000)}
 Recent tasks: ${JSON.stringify(recentTasks).slice(0, 2000)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are a behavior change coach. JSON only.",
       user: userPrompt,
       temperature: 0.35,
@@ -1689,7 +1980,7 @@ Blocks: ${JSON.stringify(blocks).slice(0, 4000)}
 Estimates: ${JSON.stringify(estimates).slice(0, 2000)}
 `.trim();
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: "You are a focus coach. JSON only.",
       user: userPrompt,
       temperature: 0.3,
@@ -1742,7 +2033,7 @@ app.post("/api/chat", async (req, res) => {
       userContent = `Context:\n${context}\n\nUser question:\n${message}`;
     }
 
-    const reply = await callDeepSeek({
+    const reply = await callLLM({
       system: systemPrompt,
       user: userContent,
       temperature: 0.7,
