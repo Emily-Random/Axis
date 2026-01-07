@@ -8123,29 +8123,87 @@ function initChatbot() {
   });
 }
 
+function applyAssistantReturnedState(d) {
+  if (!d || typeof d !== "object") return;
+
+  state = {
+    profile: d.profile || null,
+    tasks: d.tasks || [],
+    rankedTasks: d.rankedTasks || [],
+    schedule: d.schedule || [],
+    fixedBlocks: d.fixedBlocks || [],
+    goals: d.goals || [],
+    reflections: d.reflections || [],
+    blockingRules: d.blockingRules || [],
+    dailyHabits: d.dailyHabits || [],
+    focusSessions: d.focusSessions || [],
+    weeklyInsights: d.weeklyInsights || null,
+    achievements: d.achievements || {},
+    taskTemplates: d.taskTemplates || [],
+    calendarExportSettings: d.calendarExportSettings || null,
+    firstReflectionDueDate: d.firstReflectionDueDate || null,
+  };
+
+  migrateProfileData();
+  migrateGoalsData();
+  normalizeGoalsProgressInState();
+  ensureTaskIds();
+  normalizeAllTasksInState();
+  ensureTaskOrder();
+  ensureTaskTemplates();
+  restoreFromState();
+}
+
 async function generateChatReply(text) {
   const name = state.profile?.user_name || "friend";
 
   const token = getAuthToken();
 
-  // Guest/no-auth mode: use plain chat (no state mutation).
+  // Guest/no-auth mode: use stateless agent endpoint, persist locally.
   if (!token || token.startsWith("guest_")) {
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/assistant/guest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          context: `User: ${name}. Current schedule has ${state.tasks?.length || 0} tasks.`,
+          state,
         }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMsg = errorData.error || `API error: ${res.status}`;
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
+      if (data?.data && typeof data.data === "object") {
+        applyAssistantReturnedState(data.data);
+        await saveUserData();
+      }
+
       if (data && typeof data.reply === "string") return data.reply;
       throw new Error("No reply field in API response");
-    } catch (err) {
-      console.warn("Chat API failed (guest mode), using local rule-based answers instead.", err);
-      return fallbackRuleBasedReply(text);
+    } catch (assistantErr) {
+      console.warn("Guest assistant failed; falling back to chat completions.", assistantErr);
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            context: `User: ${name}. Current schedule has ${state.tasks?.length || 0} tasks.`,
+          }),
+        });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const data = await res.json();
+        if (data && typeof data.reply === "string") return data.reply;
+        throw new Error("No reply field in API response");
+      } catch (err) {
+        console.warn("Chat API failed (guest mode), using local rule-based answers instead.", err);
+        return fallbackRuleBasedReply(text);
+      }
     }
   }
 
@@ -8191,33 +8249,7 @@ async function generateChatReply(text) {
     }
     const data = await res.json();
     if (data?.data && typeof data.data === "object") {
-      const d = data.data;
-      state = {
-        profile: d.profile || null,
-        tasks: d.tasks || [],
-        rankedTasks: d.rankedTasks || [],
-        schedule: d.schedule || [],
-        fixedBlocks: d.fixedBlocks || [],
-        goals: d.goals || [],
-        reflections: d.reflections || [],
-        blockingRules: d.blockingRules || [],
-        dailyHabits: d.dailyHabits || [],
-        focusSessions: d.focusSessions || [],
-        weeklyInsights: d.weeklyInsights || null,
-        achievements: d.achievements || {},
-        taskTemplates: d.taskTemplates || [],
-        calendarExportSettings: d.calendarExportSettings || null,
-        firstReflectionDueDate: d.firstReflectionDueDate || null,
-      };
-
-      migrateProfileData();
-      migrateGoalsData();
-      normalizeGoalsProgressInState();
-      ensureTaskIds();
-      normalizeAllTasksInState();
-      ensureTaskOrder();
-      ensureTaskTemplates();
-      restoreFromState();
+      applyAssistantReturnedState(data.data);
     }
 
     if (data && typeof data.reply === "string") {

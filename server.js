@@ -9,6 +9,7 @@ const { z } = require("zod");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs").promises;
+const { spawn } = require("child_process");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
@@ -172,6 +173,186 @@ function extractFirstJsonValue(text) {
   }
 
   return "";
+}
+
+// ---------- MCP helpers ----------
+const AXIS_MCP_PROTOCOL_VERSION = "2024-11-05";
+const AXIS_MCP_SERVER_PATH = path.join(__dirname, "mcp-server.mjs");
+const AXIS_MCP_TIMEOUT_MS = 8000;
+
+function sanitizeAxisUserId(value) {
+  const userId = String(value || "").trim();
+  if (!userId) return "";
+  if (userId.length > 200) return "";
+  if (!/^[A-Za-z0-9_-]+$/.test(userId)) return "";
+  return userId;
+}
+
+function createJsonRpcLineClient(child, { timeoutMs = AXIS_MCP_TIMEOUT_MS } = {}) {
+  let buffer = "";
+  let closed = false;
+  let nextId = 1;
+  const pending = new Map();
+
+  function rejectAll(err) {
+    for (const entry of pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(err);
+    }
+    pending.clear();
+  }
+
+  function send(message) {
+    if (closed) throw new Error("MCP client is closed");
+    child.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  function request(method, params) {
+    if (closed) return Promise.reject(new Error("MCP client is closed"));
+
+    const id = nextId;
+    nextId += 1;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`MCP request timed out: ${method}`));
+      }, timeoutMs);
+
+      pending.set(id, { resolve, reject, timer });
+      send({ jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) });
+    });
+  }
+
+  function notify(method, params) {
+    if (closed) return;
+    send({ jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) });
+  }
+
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let idx;
+    while ((idx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let msg;
+      try {
+        msg = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+
+      if (!msg || typeof msg !== "object" || msg.id === undefined) continue;
+
+      const entry = pending.get(msg.id);
+      if (!entry) continue;
+
+      clearTimeout(entry.timer);
+      pending.delete(msg.id);
+
+      if (msg.error) {
+        const err = new Error(msg.error.message || "MCP error");
+        err.code = msg.error.code;
+        err.data = msg.error.data;
+        entry.reject(err);
+        continue;
+      }
+
+      entry.resolve(msg.result);
+    }
+  });
+
+  child.on("exit", (code, signal) => {
+    if (closed) return;
+    closed = true;
+    rejectAll(
+      new Error(`MCP server exited (${code ?? "?"}${signal ? `, signal ${signal}` : ""})`),
+    );
+  });
+
+  child.on("error", (err) => {
+    if (closed) return;
+    closed = true;
+    rejectAll(err);
+  });
+
+  function close() {
+    if (closed) return;
+    closed = true;
+    try {
+      child.stdin.end();
+    } catch {}
+    try {
+      child.kill();
+    } catch {}
+    rejectAll(new Error("MCP client closed"));
+  }
+
+  return { request, notify, close };
+}
+
+async function withAxisMcpClient(userId, fn) {
+  const safeUserId = sanitizeAxisUserId(userId);
+  if (!safeUserId) {
+    throw new Error("Invalid userId for MCP.");
+  }
+
+  let stderr = "";
+  const child = spawn(process.execPath, [AXIS_MCP_SERVER_PATH], {
+    cwd: __dirname,
+    env: { ...process.env, AXIS_MCP_USER_ID: safeUserId },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+    if (stderr.length > 4000) stderr = stderr.slice(-4000);
+  });
+
+  const client = createJsonRpcLineClient(child);
+
+  try {
+    await client.request("initialize", {
+      protocolVersion: AXIS_MCP_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "axis-server", version: "0.1.0" },
+    });
+    client.notify("initialized", {});
+    return await fn(client);
+  } catch (err) {
+    const suffix = stderr.trim() ? `\nMCP stderr:\n${stderr.trim()}` : "";
+    const wrapped = new Error(`${err?.message || String(err)}${suffix}`);
+    wrapped.cause = err;
+    throw wrapped;
+  } finally {
+    client.close();
+  }
+}
+
+async function axisMcpListTools(userId) {
+  return withAxisMcpClient(userId, async (client) => {
+    const result = await client.request("tools/list");
+    return Array.isArray(result?.tools) ? result.tools : [];
+  });
+}
+
+async function axisMcpCallTool(userId, name, args) {
+  return withAxisMcpClient(userId, async (client) => {
+    return client.request("tools/call", {
+      name: String(name || ""),
+      arguments: args && typeof args === "object" ? args : {},
+    });
+  });
+}
+
+function extractMcpToolText(result) {
+  const text = result?.content?.[0]?.text;
+  return typeof text === "string" ? text : "";
 }
 
 // ---------- iCalendar (.ics) helpers ----------
@@ -725,17 +906,11 @@ function formatAssistantReply({ reply, plan, actions }) {
   return out || "Done.";
 }
 
-async function runAxisAssistantAgent({ userId, message }) {
+async function runAxisAssistantAgentCore({ message, data, persist }) {
   const originalMessage = String(message || "").trim();
   if (!originalMessage) {
     return { reply: "What would you like me to help with?", plan: [], actions: [], data: null };
   }
-
-  const loaded = await getUserData(userId);
-  if (!loaded) {
-    throw new Error("User data not found.");
-  }
-  const data = normalizeUserDataState(loaded);
 
   const actions = [];
   const toolResults = [];
@@ -913,7 +1088,10 @@ async function runAxisAssistantAgent({ userId, message }) {
     },
     { name: "complete_task", input: { taskId: "string (optional)", query: "string (optional)" } },
     { name: "delete_task", input: { taskId: "string (optional)", query: "string (optional)" } },
-    { name: "add_habit", input: { name: "string (required)", time: "string (required)", description: "string (optional)" } },
+    {
+      name: "add_habit",
+      input: { name: "string (required)", time: "string (required)", description: "string (optional)" },
+    },
     { name: "delete_habit", input: { habitId: "string (optional)", query: "string (optional)" } },
     { name: "rebalance_week", input: { horizonDays: "number (optional)", maxHoursPerDay: "number (optional)" } },
   ];
@@ -969,14 +1147,19 @@ async function runAxisAssistantAgent({ userId, message }) {
     if (parsed.type === "final") {
       const plan = Array.isArray(parsed.plan) ? parsed.plan : [];
       const replyText = formatAssistantReply({ reply: parsed.reply, plan, actions });
-      await saveUserData(userId, data);
+      if (typeof persist === "function") {
+        await persist(data);
+      }
       return { reply: replyText, plan, actions, data };
     }
 
     toolResults.push({ ok: false, error: "Assistant returned unknown response type." });
   }
 
-  await saveUserData(userId, data);
+  if (typeof persist === "function") {
+    await persist(data);
+  }
+
   return {
     reply:
       "I couldn’t finish that request safely. Try rephrasing, or ask me to do one specific action (e.g., “add a task called … due …”).",
@@ -984,6 +1167,27 @@ async function runAxisAssistantAgent({ userId, message }) {
     actions,
     data,
   };
+}
+
+async function runAxisAssistantAgent({ userId, message }) {
+  const loaded = await getUserData(userId);
+  if (!loaded) {
+    throw new Error("User data not found.");
+  }
+  const data = normalizeUserDataState(loaded);
+
+  return runAxisAssistantAgentCore({
+    message,
+    data,
+    persist: async (nextData) => {
+      await saveUserData(userId, nextData);
+    },
+  });
+}
+
+async function runAxisAssistantAgentGuest({ message, state }) {
+  const data = normalizeUserDataState(state && typeof state === "object" ? state : {});
+  return runAxisAssistantAgentCore({ message, data, persist: null });
 }
 
 // --- Security / hardening middleware ---
@@ -1118,6 +1322,16 @@ const createHabitSchema = z.object({
 
 const assistantMessageSchema = z.object({
   message: z.string().min(1).max(4000),
+});
+
+const assistantGuestMessageSchema = z.object({
+  message: z.string().min(1).max(4000),
+  state: z.any().optional().default({}),
+});
+
+const mcpToolCallSchema = z.object({
+  name: z.string().min(1).max(200),
+  arguments: z.record(z.any()).optional().default({}),
 });
 
 function validateBody(schema) {
@@ -2015,6 +2229,41 @@ app.post(
     }
   },
 );
+
+app.post("/api/assistant/guest", validateBody(assistantGuestMessageSchema), async (req, res) => {
+  try {
+    const result = await runAxisAssistantAgentGuest({
+      message: req.body.message,
+      state: req.body.state,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("Error in /api/assistant/guest:", err);
+    res.status(500).json({ error: err.message || "Assistant failed." });
+  }
+});
+
+app.get("/api/mcp/tools", authenticateToken, async (req, res) => {
+  try {
+    const tools = await axisMcpListTools(req.user.userId);
+    res.json({ tools });
+  } catch (err) {
+    console.error("Error in /api/mcp/tools:", err);
+    res.status(500).json({ error: err.message || "MCP tools failed." });
+  }
+});
+
+app.post("/api/mcp/call", authenticateToken, validateBody(mcpToolCallSchema), async (req, res) => {
+  try {
+    const result = await axisMcpCallTool(req.user.userId, req.body.name, req.body.arguments);
+    const text = extractMcpToolText(result);
+    const parsed = text ? safeParseJSON(text) : null;
+    res.json({ result, parsed });
+  } catch (err) {
+    console.error("Error in /api/mcp/call:", err);
+    res.status(500).json({ error: err.message || "MCP call failed." });
+  }
+});
 
 app.post("/api/chat", async (req, res) => {
   try {
