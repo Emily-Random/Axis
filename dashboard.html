@@ -255,85 +255,87 @@
         </section>
 
         <!-- Daily Habits -->
-        <section class="panel panel-habits">
-          <div class="panel-header">
-            <h2>Daily Habits</h2>
-            <span class="panel-subtitle">Fixed tasks you can set up</span>
-          </div>
-          <div class="habits-content">
-            <button type="button" id="addHabitBtn" class="btn-add-goal" title="Add a new habit">
-              <span class="btn-add-goal-icon">+</span>
-              <span>Add Daily Habit</span>
-            </button>
-            <div id="habitsList" class="habits-list">
-              <!-- Daily habits populated by JS -->
-            </div>
-          </div>
-        </section>
+	        <section class="panel panel-habits">
+	          <div class="panel-header">
+	            <h2>Daily Habits</h2>
+	            <span class="panel-subtitle">Fixed tasks you can set up</span>
+	          </div>
+	          <div class="habits-content">
+	            <button type="button" id="addHabitBtn" class="btn-add-goal" title="Add a new habit">
+	              <span class="btn-add-goal-icon">+</span>
+	              <span>Add Daily Habit</span>
+	            </button>
+	            <div id="habitsList" class="habits-list">
+	              <!-- Daily habits populated by JS -->
+	            </div>
+	          </div>
+	        </section>
+	      </aside>
 
-        <!-- Chatbot -->
-        <section class="panel panel-chat">
-          <div class="panel-header">
-            <h2>Axis Assistant</h2>
-            <span class="panel-subtitle">Ask for planning &amp; focus tips</span>
-          </div>
-          <div id="chatWindow" class="chat-window">
-            <!-- Chat messages -->
-          </div>
-          <form id="chatForm" class="chat-input-row">
-            <input
-              type="text"
-              id="chatInput"
-              placeholder="Ask me anything about your schedule..."
-              autocomplete="off"
-            />
-            <button type="submit" class="btn btn-primary">Send</button>
-          </form>
-        </section>
-      </aside>
+	      <section class="main-panel">
+	        <!-- Middle: Calendar -->
+	        <section class="calendar-section">
+	          <header class="calendar-header">
+	            <div class="calendar-title">
+	              <h2>Your AI‑generated schedule</h2>
+	              <span id="calendarSubtitle" class="calendar-subtitle">
+	                Once generated, your time‑blocked plan will appear here.
+	              </span>
+	            </div>
+	            <div class="calendar-controls">
+	              <button id="syncCalendarBtn" class="btn btn-secondary btn-sync" title="Sync daily goals to tasks and regenerate schedule">
+	                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+	                  <path d="M1 8v6h6M15 8V2H9M1 8l6-6M15 8l-6 6"/>
+	                </svg>
+	                Sync Calendar
+	              </button>
+	              <button id="rebalanceWeekBtn" class="btn btn-secondary btn-sync" title="Rebalance your schedule for the week">
+	                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+	                  <path d="M8 1a7 7 0 1 0 7 7"/>
+	                  <path d="M13.5 3.5v4h-4"/>
+	                </svg>
+	                Rebalance Week
+	              </button>
+	              <button id="calendarExportBtn" class="btn btn-secondary btn-sync" title="Export schedule to iCal/Google" aria-label="Export schedule">
+	                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;" aria-hidden="true">
+	                  <path d="M8 2v7"/>
+	                  <path d="M5 6l3 3 3-3"/>
+	                  <path d="M2 13h12"/>
+	                </svg>
+	                Export
+	                <span id="calendarExportBadge" class="calendar-export-badge hidden" aria-hidden="true"></span>
+	              </button>
+	              <button class="btn-toggle-view active" data-view="daily">Daily</button>
+	              <button class="btn-toggle-view" data-view="weekly">Weekly</button>
+	              <button class="btn-toggle-view" data-view="monthly">Monthly</button>
+	            </div>
+	          </header>
 
-      <!-- Middle: Calendar -->
-      <section class="calendar-section">
-        <header class="calendar-header">
-          <div class="calendar-title">
-            <h2>Your AI‑generated schedule</h2>
-            <span id="calendarSubtitle" class="calendar-subtitle">
-              Once generated, your time‑blocked plan will appear here.
-            </span>
-          </div>
-          <div class="calendar-controls">
-            <button id="syncCalendarBtn" class="btn btn-secondary btn-sync" title="Sync daily goals to tasks and regenerate schedule">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-                <path d="M1 8v6h6M15 8V2H9M1 8l6-6M15 8l-6 6"/>
-              </svg>
-              Sync Calendar
-            </button>
-            <button id="rebalanceWeekBtn" class="btn btn-secondary btn-sync" title="Rebalance your schedule for the week">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-                <path d="M8 1a7 7 0 1 0 7 7"/>
-                <path d="M13.5 3.5v4h-4"/>
-              </svg>
-              Rebalance Week
-            </button>
-            <button id="calendarExportBtn" class="btn btn-secondary btn-sync" title="Export schedule to iCal/Google" aria-label="Export schedule">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;" aria-hidden="true">
-                <path d="M8 2v7"/>
-                <path d="M5 6l3 3 3-3"/>
-                <path d="M2 13h12"/>
-              </svg>
-              Export
-              <span id="calendarExportBadge" class="calendar-export-badge hidden" aria-hidden="true"></span>
-            </button>
-            <button class="btn-toggle-view active" data-view="daily">Daily</button>
-            <button class="btn-toggle-view" data-view="weekly">Weekly</button>
-            <button class="btn-toggle-view" data-view="monthly">Monthly</button>
-          </div>
-        </header>
+	          <div id="calendarContainer" class="calendar-container">
+	            <!-- Calendar rendered by JS -->
+	          </div>
+	        </section>
 
-        <div id="calendarContainer" class="calendar-container">
-          <!-- Calendar rendered by JS -->
-        </div>
-      </section>
+	        <!-- Chatbot -->
+	        <section class="panel panel-chat panel-chat-large">
+	          <div class="panel-header">
+	            <h2>Axis Assistant</h2>
+	            <span class="panel-subtitle">Ask for planning &amp; focus tips</span>
+	          </div>
+	          <div id="chatWindow" class="chat-window">
+	            <!-- Chat messages -->
+	          </div>
+	          <form id="chatForm" class="chat-input-row">
+	            <input
+	              type="text"
+	              id="chatInput"
+	              placeholder="Ask me anything about your schedule..."
+	              autocomplete="off"
+	            />
+	            <button type="submit" class="btn btn-primary">Send</button>
+	          </form>
+	        </section>
+	      </section>
 
 
       <!-- Multi-step onboarding modal (only shown during signup) -->
@@ -363,17 +365,23 @@
                   <input type="text" id="user_name" required />
                 </label>
 
-                <label>
-                  Age group
-                  <select id="user_age_group" required>
-                    <option value="">Select...</option>
-                    <option>Middle School</option>
-                    <option>High School</option>
-                    <option>College</option>
-                    <option>Other</option>
-                  </select>
-                </label>
-              </fieldset>
+	                <label>
+	                  Age group
+	                  <select id="user_age_group" required>
+	                    <option value="">Select...</option>
+	                    <option>1-10</option>
+	                    <option>11-20</option>
+	                    <option>21-30</option>
+	                    <option>31-40</option>
+	                    <option>41-50</option>
+	                    <option>51-60</option>
+	                    <option>61-70</option>
+	                    <option>71-80</option>
+	                    <option>81-90</option>
+	                    <option>91+</option>
+	                  </select>
+	                </label>
+	              </fieldset>
 
               <!-- Schedule & Routine -->
               <fieldset>
