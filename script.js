@@ -1691,7 +1691,8 @@ async function handleLogin(identifier, password) {
     }
 
     if (!res.ok) {
-      showError("#authError", data.error || `Login failed (${res.status})`);
+      const detail = Array.isArray(data.details) ? data.details.map((d) => d?.message).find(Boolean) : null;
+      showError("#authError", detail || data.error || `Login failed (${res.status})`);
       return false;
     }
 
@@ -1748,7 +1749,8 @@ async function handleSignup(name, username, email, password) {
     }
 
     if (!res.ok) {
-      showError("#signupError", data.error || `Signup failed (${res.status})`);
+      const detail = Array.isArray(data.details) ? data.details.map((d) => d?.message).find(Boolean) : null;
+      showError("#signupError", detail || data.error || `Signup failed (${res.status})`);
       return false;
     }
 

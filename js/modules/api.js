@@ -119,16 +119,16 @@ export class Api {
   static async login(email, password) {
     const data = await this.request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier: email, password }),
     });
     this.setAuth(data.token, data.user);
     return data;
   }
 
-  static async register(name, email, password) {
+  static async register(name, email, password, username) {
     const data = await this.request("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, username, email, password }),
     });
     this.setAuth(data.token, data.user);
     return data;

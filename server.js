@@ -510,17 +510,44 @@ function requireJwtSecret(res) {
 }
 
 // --- Request validation schemas ---
+function emptyStringToUndefined(value) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+const identifierSchema = z.preprocess(emptyStringToUndefined, z.string().min(1).max(254).optional());
+const optionalUsernameSchema = z.preprocess(
+  emptyStringToUndefined,
+  z
+    .string()
+    .min(3)
+    .max(30)
+    .regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores")
+    .optional(),
+);
+
 const registerSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(8).max(200),
   name: z.string().trim().min(1).max(100),
-  username: z.string().trim().min(3).max(30).regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores"),
+  username: optionalUsernameSchema,
 });
 
-const loginSchema = z.object({
-  identifier: z.string().trim().min(1).max(254), // Can be name, username, or email
-  password: z.string().min(1).max(200),
-});
+const loginSchema = z
+  .object({
+    identifier: identifierSchema, // Can be name, username, or email
+    email: identifierSchema, // Backwards-compatible alias for older clients
+    password: z.string().min(1).max(200),
+  })
+  .refine((data) => Boolean(data.identifier || data.email), {
+    message: "Missing identifier",
+    path: ["identifier"],
+  })
+  .transform((data) => ({
+    identifier: data.identifier || data.email,
+    password: data.password,
+  }));
 
 const aiRescheduleSchema = z.object({
   tasks: z
@@ -884,7 +911,7 @@ app.post("/api/auth/register", validateBody(registerSchema), async (req, res) =>
     const { email, password, name, username } = req.body;
     const emailKey = String(email || "").trim().toLowerCase();
     const nameClean = String(name || "").trim();
-    const usernameClean = String(username || "").trim();
+    let usernameClean = typeof username === "string" ? username.trim() : "";
 
     const users = await getUsers();
     
@@ -893,13 +920,41 @@ app.post("/api/auth/register", validateBody(registerSchema), async (req, res) =>
     if (existingEmailKey) {
       return res.status(409).json({ error: "Email already registered" });
     }
-    
-    // Check if username already exists
-    const usernameExists = Object.values(users).some(
-      (u) => u.username && u.username.toLowerCase() === usernameClean.toLowerCase()
-    );
-    if (usernameExists) {
+
+    const isUsernameTaken = (candidate) =>
+      Object.values(users).some((u) => u.username && u.username.toLowerCase() === candidate.toLowerCase());
+
+    if (usernameClean && isUsernameTaken(usernameClean)) {
       return res.status(409).json({ error: "Username already taken" });
+    }
+
+    if (!usernameClean) {
+      const localPart = emailKey.split("@")[0] || "user";
+      const base = localPart
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 24);
+      usernameClean = base.length >= 3 ? base : `user_${crypto.randomBytes(3).toString("hex")}`;
+    }
+
+    // Ensure uniqueness (handles auto-generated and user-provided edge cases).
+    if (isUsernameTaken(usernameClean)) {
+      const preferred = usernameClean;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const suffix = crypto.randomBytes(2).toString("hex"); // 4 chars
+        const base = preferred.slice(0, Math.max(3, 30 - (suffix.length + 1)));
+        const candidate = `${base}_${suffix}`;
+        if (!isUsernameTaken(candidate)) {
+          usernameClean = candidate;
+          break;
+        }
+      }
+    }
+
+    if (isUsernameTaken(usernameClean)) {
+      return res.status(409).json({ error: "Unable to allocate a unique username. Please try again." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
