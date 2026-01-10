@@ -9364,9 +9364,9 @@ function exportInsightsAsPng() {
 
   // Header
   ctx.fillStyle = "#0f172a";
-  ctx.font = "700 28px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '700 28px "Neue Montreal"';
   ctx.fillText("Axis Insights", 40, 58);
-  ctx.font = "500 14px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '500 14px "Neue Montreal"';
   ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
   ctx.fillText(new Date().toLocaleString(), 40, 82);
 
@@ -9377,10 +9377,10 @@ function exportInsightsAsPng() {
     ctx.lineWidth = 1;
     roundRect(ctx, x, y, 200, 74, 14, true, true);
     ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
-    ctx.font = "600 12px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.font = '500 12px "Neue Montreal"';
     ctx.fillText(title, x + 14, y + 26);
     ctx.fillStyle = "#16a34a";
-    ctx.font = "800 26px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.font = '700 26px "Neue Montreal"';
     ctx.fillText(value, x + 14, y + 56);
   }
 
@@ -9407,10 +9407,10 @@ function exportInsightsAsPng() {
 
   // Insights text
   ctx.fillStyle = "#0f172a";
-  ctx.font = "700 16px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '700 16px "Neue Montreal"';
   ctx.fillText("Highlights", 40, 220);
   ctx.fillStyle = "rgba(15, 23, 42, 0.75)";
-  ctx.font = "500 13px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '500 13px "Neue Montreal"';
   wrapText(ctx, metricsText, 40, 246, 920, 18);
 
   function wrapText(ctx, text, x, y, maxWidth, lineHeight) {

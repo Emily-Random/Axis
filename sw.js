@@ -1,7 +1,7 @@
 /* global self */
 
-const STATIC_CACHE = "axis-static-v2";
-const RUNTIME_CACHE = "axis-runtime-v2";
+const STATIC_CACHE = "axis-static-v3";
+const RUNTIME_CACHE = "axis-runtime-v3";
 const DB_NAME = "axis_pwa";
 const DB_VERSION = 1;
 
@@ -13,6 +13,14 @@ const CORE_ASSETS = [
   "dashboard.js",
   "manifest.json",
   "favicon.svg",
+  "fonts/NeueMontreal-Bold.otf",
+  "fonts/NeueMontreal-BoldItalic.otf",
+  "fonts/NeueMontreal-Italic.otf",
+  "fonts/NeueMontreal-Light.otf",
+  "fonts/NeueMontreal-LightItalic.otf",
+  "fonts/NeueMontreal-Medium.otf",
+  "fonts/NeueMontreal-MediumItalic.otf",
+  "fonts/NeueMontreal-Regular.otf",
   "assets/axis-banner.svg",
   "assets/illustrations/empty-calendar.svg",
   "assets/illustrations/empty-goals.svg",

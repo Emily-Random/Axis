@@ -1,4 +1,68 @@
 /* Light mode */
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-Light.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-LightItalic.otf") format("opentype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-Italic.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-Medium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-MediumItalic.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Montreal";
+  src: url("fonts/NeueMontreal-BoldItalic.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 :root {
   --bg: #ffffff;
   --bg-alt: #f6f6f8;
@@ -7,8 +71,8 @@
   --text-muted: #60646f;
   --text-primary: var(--text-main);
   --text-secondary: var(--text-muted);
-  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-  --font-serif: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-sans: "Neue Montreal", sans-serif;
+  --font-serif: "Neue Montreal", sans-serif;
   --accent-green: #d64d6b; /* primary red - lightened */
   --accent-green-soft: #f8eef2; /* soft red tint - lightened */
   --accent-green-dark: #c23d5a;
@@ -825,7 +889,7 @@ body {
 }
 
 kbd {
-  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-sans);
   font-size: 0.78rem;
   padding: 2px 8px;
   border-radius: 10px;
@@ -1242,7 +1306,7 @@ body {
 }
 
 .logo-text {
-  font-weight: 400;
+  font-weight: 700;
   letter-spacing: 0.04em;
   font-size: 1.15rem;
   color: var(--text-main);
@@ -3595,7 +3659,7 @@ textarea {
   color: var(--accent-green);
   margin: 16px 0 8px;
   line-height: 1;
-  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+  font-family: var(--font-sans);
 }
 
 .pomodoro-status {
@@ -4663,7 +4727,7 @@ textarea {
   background: var(--bg-alt);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  font-family: monospace;
+  font-family: var(--font-sans);
   font-size: 0.75rem;
   color: var(--text-muted);
 }

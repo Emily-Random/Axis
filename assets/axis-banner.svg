@@ -1,5 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-label="Axis banner">
   <title>Axis</title>
+  <style>
+    @font-face {
+      font-family: "Neue Montreal";
+      src: url("../fonts/NeueMontreal-Medium.otf") format("opentype");
+      font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Neue Montreal";
+      src: url("../fonts/NeueMontreal-Bold.otf") format("opentype");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+  </style>
   <g>
     <g transform="translate(0 0)">
       <g transform="translate(600 120)">
@@ -14,7 +31,7 @@
         <text
           x="-150"
           y="48"
-          font-family="Playfair Display, Georgia, 'Times New Roman', serif"
+          font-family="Neue Montreal"
           font-size="160"
           font-weight="700"
           fill="#ffffff"
@@ -30,9 +47,9 @@
       x="600"
       y="240"
       text-anchor="middle"
-      font-family="Playfair Display, Georgia, 'Times New Roman', serif"
+      font-family="Neue Montreal"
       font-size="64"
-      font-weight="600"
+      font-weight="500"
       fill="#ffffff"
       stroke="#5b4ee6"
       stroke-width="4"
