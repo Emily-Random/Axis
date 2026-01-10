@@ -2998,6 +2998,8 @@ function initDeadlineTimeOptions() {
 }
 
 function initProfileInteractions() {
+  initAgeGroupButtons();
+
   // Procrastinator yes/no buttons - remove existing listeners by cloning
   const procrastGroup = $("#is_procrastinator_group");
   if (procrastGroup && !procrastGroup.dataset.initialized) {
@@ -3015,6 +3017,7 @@ function initProfileInteractions() {
   }
 
   const buttonGroups = [
+    "#age_group_group",
     "#has_trouble_finishing_group",
   ];
 
@@ -3030,7 +3033,11 @@ function initProfileInteractions() {
       }
       group
         .querySelectorAll("button")
-        .forEach((btn) => btn.classList.toggle("selected", btn === e.target));
+        .forEach((btn) => {
+          const selected = btn === e.target;
+          btn.classList.toggle("selected", selected);
+          btn.setAttribute("aria-pressed", selected ? "true" : "false");
+        });
     });
   });
 
@@ -3152,6 +3159,36 @@ const AXIS_AGE_GROUP_OPTIONS = [
   "101+",
 ];
 
+function initAgeGroupButtons() {
+  const group = $("#age_group_group");
+  const hidden = $("#user_age_group");
+  if (!group || !hidden) return;
+  if (group.dataset.ageButtonsBuilt === "1") return;
+  group.dataset.ageButtonsBuilt = "1";
+
+  AXIS_AGE_GROUP_OPTIONS.forEach((value) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.value = value;
+    btn.textContent = value;
+    group.insertBefore(btn, hidden);
+  });
+
+  syncAgeGroupButtons();
+}
+
+function syncAgeGroupButtons() {
+  const group = $("#age_group_group");
+  const hidden = $("#user_age_group");
+  if (!group || !hidden) return;
+  const selected = hidden.value;
+  group.querySelectorAll("button[data-value]").forEach((btn) => {
+    const isSelected = btn.dataset.value === selected;
+    btn.classList.toggle("selected", isSelected);
+    btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
 function axisAgeToRange(age) {
   if (!Number.isFinite(age) || age <= 0) return "";
   if (age >= 101) return "101+";
@@ -3181,6 +3218,7 @@ function normalizeAgeGroupValue(value) {
 }
 
 function readProfileFromForm() {
+  initAgeGroupButtons();
   const user_name = $("#user_name").value.trim();
   const user_age_group = $("#user_age_group").value;
   if (!user_name || !user_age_group) {
@@ -3252,7 +3290,9 @@ function restoreProfileToForm() {
     nameInput.value = p.user_name || "";
   }
   syncLockedDisplayNameInput();
+  initAgeGroupButtons();
   $("#user_age_group").value = normalizeAgeGroupValue(p.user_age_group);
+  syncAgeGroupButtons();
 
   // Restore weekly schedule commitments
   ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach((day) => {

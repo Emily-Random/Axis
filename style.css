@@ -2179,6 +2179,21 @@ textarea {
   
 }
 
+.button-group.age-group-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  align-items: stretch;
+  gap: 8px;
+}
+
+.button-group.age-group-options button {
+  width: 100%;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 6px 10px;
+}
+
 .conditional-row.hidden {
   display: none;
 }

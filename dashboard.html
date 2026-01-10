@@ -370,20 +370,9 @@
 
                 <label>
                   Age group
-                  <select id="user_age_group" required>
-                    <option value="">Select...</option>
-                    <option value="1-10">1-10</option>
-                    <option value="11-20">11-20</option>
-                    <option value="21-30">21-30</option>
-                    <option value="31-40">31-40</option>
-                    <option value="41-50">41-50</option>
-                    <option value="51-60">51-60</option>
-                    <option value="61-70">61-70</option>
-                    <option value="71-80">71-80</option>
-                    <option value="81-90">81-90</option>
-                    <option value="91-100">91-100</option>
-                    <option value="101+">101+</option>
-                  </select>
+                  <div id="age_group_group" class="button-group age-group-options" role="radiogroup" aria-label="Age group">
+                    <input type="hidden" id="user_age_group" required />
+                  </div>
                 </label>
               </fieldset>
 
