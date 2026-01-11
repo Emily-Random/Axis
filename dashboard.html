@@ -17,14 +17,10 @@
   <meta name="theme-color" content="#10b981" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <title>Axis - Dashboard</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <a href="#main-content" class="skip-link">Skip to main content</a>
   <div id="app">
     <!-- Main Dashboard -->
     <div id="dashboard" class="dashboard">
@@ -272,30 +268,10 @@
           </div>
         </section>
 
-        <!-- Chatbot -->
-        <section class="panel panel-chat" aria-labelledby="chat-heading">
-          <div class="panel-header">
-            <h2 id="chat-heading">Axis Assistant</h2>
-            <span class="panel-subtitle">Ask for planning &amp; focus tips</span>
-          </div>
-          <div id="chatWindow" class="chat-window" role="log" aria-label="Chat messages" aria-live="polite" aria-atomic="false">
-            <!-- Chat messages -->
-          </div>
-          <form id="chatForm" class="chat-input-row" aria-label="Chat input form">
-            <label for="chatInput" class="sr-only">Type your message</label>
-            <input
-              type="text"
-              id="chatInput"
-              placeholder="Ask me anything about your schedule..."
-              autocomplete="off"
-              aria-label="Chat message input"
-            />
-            <button type="submit" class="btn btn-primary" aria-label="Send message">Send</button>
-          </form>
-        </section>
       </aside>
 
-      <!-- Middle: Calendar -->
+      <!-- Main column: Calendar + Assistant -->
+      <div class="main-column" aria-label="Schedule and assistant">
       <section class="calendar-section" aria-labelledby="calendar-heading">
         <header class="calendar-header">
           <div class="calendar-title">
@@ -338,6 +314,29 @@
         </div>
       </section>
 
+      <!-- Axis Assistant -->
+      <section class="panel panel-chat panel-chat-main" aria-labelledby="chat-heading">
+        <div class="panel-header">
+          <h2 id="chat-heading">Axis Assistant</h2>
+          <span class="panel-subtitle">Ask me to plan, organize, or change your schedule</span>
+        </div>
+        <div id="chatWindow" class="chat-window" role="log" aria-label="Chat messages" aria-live="polite" aria-atomic="false">
+          <!-- Chat messages -->
+        </div>
+        <form id="chatForm" class="chat-input-row" aria-label="Chat input form">
+          <label for="chatInput" class="sr-only">Type your message</label>
+          <input
+            type="text"
+            id="chatInput"
+            placeholder="Try: “Add a 2h essay task due Friday 6pm, then rebalance my week”"
+            autocomplete="off"
+            aria-label="Chat message input"
+          />
+          <button type="submit" class="btn btn-primary" aria-label="Send message">Send</button>
+        </form>
+      </section>
+      </div>
+
 
       <!-- Multi-step onboarding modal (only shown during signup) -->
       <div id="wizard" class="wizard-modal hidden">
@@ -346,15 +345,17 @@
           <section class="wizard">
         <!-- Step indicators -->
         <div class="wizard-steps">
-          <div class="wizard-step-indicator" data-step="1">1. Profile</div>
-          <div class="wizard-step-indicator" data-step="2">2. Goals</div>
+          <div class="wizard-step-indicator" data-step="1">1. About</div>
+          <div class="wizard-step-indicator" data-step="2">2. Preferences</div>
+          <div class="wizard-step-indicator" data-step="3">3. Goals</div>
+          <div class="wizard-step-indicator" data-step="4">4. Finish</div>
         </div>
 
           <!-- Step 1: Onboarding -->
           <div class="wizard-step" data-step="1">
-            <h2>Step 1: Tell Axis about you</h2>
+            <h2>Step 1: Basics</h2>
             <p class="step-description">
-              I'll create a realistic plan around your real life, not the other way around.
+              Two quick details to personalize Axis. Next, you’ll set your availability and work preferences.
             </p>
 
             <form id="profileForm" class="form-grid">
@@ -363,39 +364,47 @@
                 <legend>Basic Info</legend>
                 <label>
                   Name
-                  <input type="text" id="user_name" required />
+                  <input type="text" id="user_name" required readonly aria-readonly="true" autocomplete="name" />
                 </label>
 
                 <label>
                   Age group
-                  <select id="user_age_group" required>
-                    <option value="">Select...</option>
-                    <option>Middle School</option>
-                    <option>High School</option>
-                    <option>College</option>
-                    <option>Other</option>
-                  </select>
+                  <div id="age_group_group" class="button-group age-group-options" role="radiogroup" aria-label="Age group">
+                    <input type="hidden" id="user_age_group" required />
+                  </div>
                 </label>
               </fieldset>
 
+              <div class="wizard-actions">
+                <button type="button" id="wizardProfileContinueBtn" class="btn btn-primary">
+                  Continue
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Step 2: Preferences -->
+          <div class="wizard-step" data-step="2">
+            <h2>Step 2: Preferences</h2>
+            <p class="step-description">
+              Tell Axis what your days typically look like and how you prefer to work. You can edit these later in Settings.
+            </p>
+
+            <form id="preferencesForm" class="form-grid">
               <!-- Schedule & Routine -->
               <fieldset>
-                <legend>Schedule &amp; Routine</legend>
+                <legend>Availability</legend>
                 <div class="subsection">
-                  <label>Weekly schedule (Mon‑Fri)</label>
-                  <p class="hint">
-                    Add multiple fixed commitments per day (classes, clubs, etc.). Each needs a name, time range, and optional description.
-                  </p>
+                  <label>Weekly commitments (Mon‑Fri)</label>
+                  <p class="hint">Classes, clubs, work shifts — anything that blocks time.</p>
                   <div id="weekly_schedule" class="weekly-grid">
                     <!-- Generated by JS -->
                   </div>
                 </div>
 
                 <div class="subsection">
-                  <label>Weekend fixed activities (Sat & Sun)</label>
-                  <p class="hint">
-                    Add multiple fixed activities for weekends. Each needs a day, name, time range, and optional description.
-                  </p>
+                  <label>Weekend commitments (Sat & Sun)</label>
+                  <p class="hint">Anything fixed on weekends that should be respected.</p>
                   <div id="weekend_schedule" class="weekend-grid">
                     <!-- Generated by JS -->
                   </div>
@@ -413,14 +422,14 @@
                 </div>
 
                 <label>
-                  Standard break times (e.g., lunch)
+                  Standard break times (optional)
                   <input type="text" id="break_times" placeholder="12:30‑13:00 lunch; 18:00‑18:30 dinner" />
                 </label>
               </fieldset>
 
               <!-- Learning Personalization -->
               <fieldset>
-                <legend>Learning Personalization</legend>
+                <legend>Work Style</legend>
 
                 <div class="button-group" id="is_procrastinator_group">
                   <span class="label-inline">Do you tend to procrastinate?</span>
@@ -480,66 +489,36 @@
 
                   <label>
                     Preferred study method
-                    <input
-                      type="text"
-                      id="preferred_study_method"
-                      placeholder="e.g., 25-min study, 5-min break"
-                    />
+                    <input type="text" id="preferred_study_method" placeholder="e.g., 25-min study, 5-min break" />
                   </label>
                 </div>
               </fieldset>
 
               <!-- Work-Life Balance -->
               <fieldset>
-                <legend>Work‑Life Balance</legend>
+                <legend>Balance</legend>
                 <div class="two-col">
                   <label>
                     Weekly personal (no‑work) hours
-                    <input
-                      type="number"
-                      id="weekly_personal_time"
-                      min="0"
-                      max="80"
-                      step="0.5"
-                      placeholder="e.g., 10"
-                    />
+                    <input type="number" id="weekly_personal_time" min="0" max="80" step="0.5" placeholder="e.g., 10" />
                   </label>
                   <label>
                     Weekly review hours
-                    <input
-                      type="number"
-                      id="weekly_review_hours"
-                      min="0"
-                      max="40"
-                      step="0.5"
-                      placeholder="e.g., 3"
-                    />
+                    <input type="number" id="weekly_review_hours" min="0" max="40" step="0.5" placeholder="e.g., 3" />
                   </label>
                 </div>
               </fieldset>
 
-              <!-- Goals Hierarchy -->
-              <fieldset>
-                <legend>Goals Hierarchy</legend>
-                <p class="hint">
-                  Set your goals across different timeframes. The AI will help you break them down and organize your tasks accordingly.
-                </p>
-                <div id="onboardingGoalsHierarchy" class="goals-hierarchy">
-                  <!-- Goals will be rendered here by JS -->
-                </div>
-              </fieldset>
-
-              <div class="wizard-actions">
-                <button type="button" id="saveProfileBtn" class="btn btn-primary">
-                  Save profile &amp; continue
-                </button>
+              <div class="wizard-actions wizard-actions-bottom">
+                <button type="button" id="wizardPreferencesBackBtn" class="btn btn-ghost">Back</button>
+                <button type="button" id="wizardPreferencesContinueBtn" class="btn btn-primary">Save &amp; continue</button>
               </div>
             </form>
           </div>
 
-          <!-- Step 2: Goal Canvas -->
-          <div class="wizard-step" data-step="2">
-            <h2>Step 2: Set Your Goals</h2>
+          <!-- Step 3: Goal Canvas -->
+          <div class="wizard-step" data-step="3">
+            <h2>Step 3: Set Your Goals</h2>
             <p class="step-description">
               Create your goal hierarchy by adding long-term goals. Choose your preferred timeframe, and AI will suggest breakdown goals automatically.
             </p>
@@ -563,14 +542,14 @@
             </div>
 
             <div class="wizard-actions wizard-actions-bottom">
-              <button type="button" id="backToProfileBtn" class="btn btn-ghost">Back</button>
+              <button type="button" id="backToPreferencesBtn" class="btn btn-ghost">Back</button>
               <button type="button" id="finishGoalsBtn" class="btn btn-primary">Finish</button>
             </div>
           </div>
 
-          <!-- Step 3: Confirmation -->
-          <div class="wizard-step" data-step="3">
-            <h2>Step 3: Confirm your plan</h2>
+          <!-- Step 4: Confirmation -->
+          <div class="wizard-step" data-step="4">
+            <h2>Step 4: Confirm your plan</h2>
             <p class="step-description">
               Here's how I'm ranking your tasks. I'll schedule them so everything is completed
               <strong>before</strong> the deadline.
@@ -652,10 +631,10 @@
             
             <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border-subtle);">
             
-            <h3>Learning Preferences</h3>
-            <p class="settings-description">Update your learning personalization settings.</p>
+            <h3>Preferences</h3>
+            <p class="settings-description">Update availability, sleep, breaks, and work style.</p>
             <button type="button" class="btn btn-secondary" id="editLearningPrefsBtn">
-              Edit Learning Preferences
+              Edit Preferences
             </button>
           </div>
 
@@ -788,6 +767,21 @@
             <div style="margin-top: 18px;">
               <h4 style="margin: 0 0 10px;">Achievements</h4>
               <div id="achievementBadges" class="achievement-badges"></div>
+            </div>
+
+            <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border-subtle);">
+
+            <h3>AI Provider</h3>
+            <p class="settings-description">
+              Choose which AI Axis uses for scheduling and the assistant.
+            </p>
+            <div class="settings-form" style="max-width: 520px;">
+              <div id="aiProviderSaveStatus" class="save-status"></div>
+              <div class="form-group">
+                <label for="aiProviderSelect">Provider</label>
+                <select id="aiProviderSelect"></select>
+                <small class="form-hint" id="aiProviderHelp">Loading…</small>
+              </div>
             </div>
 
             <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border-subtle);">

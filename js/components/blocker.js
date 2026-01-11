@@ -47,7 +47,7 @@ export class WebsiteBlocker {
       }
       .blocker-badge-timer {
         font-variant-numeric: tabular-nums;
-        font-family: monospace;
+        font-family: var(--font-sans, "Neue Montreal");
       }
       .blocker-badge.hidden {
         display: none;
@@ -125,7 +125,7 @@ export class WebsiteBlocker {
         line-height: 1.6;
       }
       .blocked-domain {
-        font-family: monospace;
+        font-family: var(--font-sans, "Neue Montreal");
         background: rgba(255,255,255,0.1);
         padding: 8px 16px;
         border-radius: 8px;
@@ -185,7 +185,7 @@ export class WebsiteBlocker {
       }
       .blocker-rule-domain {
         flex: 1;
-        font-family: monospace;
+        font-family: var(--font-sans, "Neue Montreal");
         font-size: 0.9rem;
         color: #1f2937;
       }

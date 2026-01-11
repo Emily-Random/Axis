@@ -295,7 +295,15 @@ const PRODUCTIVE_TIME_WINDOWS = {
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+const AXIS_SUPPORTED_AI_PROVIDERS = new Set(["deepseek", "openai", "gemini"]);
+
+function normalizeAiProvider(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  return AXIS_SUPPORTED_AI_PROVIDERS.has(raw) ? raw : null;
+}
+
 let state = {
+  settings: { aiProvider: null },
   profile: null,
   tasks: [],
   rankedTasks: [],
@@ -755,7 +763,25 @@ function initPwaSupport() {
     });
   }
 
+  function removeSkipToMainLinks() {
+    try {
+      document
+        .querySelectorAll(
+          [
+            'a[href="#main-content"]',
+            'a[href="#mainContent"]',
+            "a.skip-link",
+            "a.skip-to-main",
+            "#skip-to-main",
+            "#skipToMain",
+          ].join(","),
+        )
+        .forEach((el) => el.remove());
+    } catch {}
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
+    removeSkipToMainLinks();
     axisUpdateOfflineIndicator();
     axisUpdateInstallUi();
     axisFlushQueue();
@@ -784,6 +810,9 @@ async function loadUserData() {
 
     const data = await res.json();
     state = {
+      settings: {
+        aiProvider: normalizeAiProvider(data?.settings?.aiProvider),
+      },
       profile: data.profile || null,
       tasks: data.tasks || [],
       rankedTasks: data.rankedTasks || [],
@@ -824,6 +853,9 @@ async function loadUserData() {
     const cached = await axisLoadCachedStateSnapshot();
     if (cached) {
       state = {
+        settings: {
+          aiProvider: normalizeAiProvider(cached?.settings?.aiProvider),
+        },
         profile: cached.profile || null,
         tasks: cached.tasks || [],
         rankedTasks: cached.rankedTasks || [],
@@ -945,6 +977,15 @@ function migrateProfileData() {
   if (profile.works_best !== undefined) {
     delete profile.works_best;
     migrated = true;
+  }
+
+  // Normalize age group to numeric ranges (legacy: Middle School/High School/etc.)
+  if (profile.user_age_group) {
+    const normalized = normalizeAgeGroupValue(profile.user_age_group);
+    if (normalized && profile.user_age_group !== normalized) {
+      profile.user_age_group = normalized;
+      migrated = true;
+    }
   }
   
   // Save migrated data back to state
@@ -1082,8 +1123,27 @@ function $all(selector) {
   return Array.from(document.querySelectorAll(selector));
 }
 
+function getLockedDisplayName() {
+  const fromAccount = currentUser?.name;
+  if (typeof fromAccount === "string" && fromAccount.trim()) return fromAccount.trim();
+  const fromProfile = state?.profile?.user_name;
+  if (typeof fromProfile === "string" && fromProfile.trim()) return fromProfile.trim();
+  return "";
+}
+
+function syncLockedDisplayNameInput() {
+  const input = document.getElementById("user_name");
+  if (!input) return;
+  const locked = getLockedDisplayName();
+  if (locked) {
+    input.value = locked;
+  }
+  input.readOnly = true;
+  input.setAttribute("aria-readonly", "true");
+}
+
 function applyOnboardingModeUI() {
-  const stepsToHide = ["2", "3"];
+  const stepsToHide = ["3", "4"];
   stepsToHide.forEach((step) => {
     const stepEl = document.querySelector(`.wizard-step[data-step="${step}"]`);
     const indicatorEl = document.querySelector(
@@ -1106,7 +1166,7 @@ function setStep(step) {
   if (!wizard) return;
   
   // In personalization-only mode, force step 1 and hide later steps
-  if (onboardingMode === "personalization-only" && step && step !== 1) {
+  if (onboardingMode === "personalization-only" && step && !["1", "2"].includes(String(step))) {
     step = 1;
   }
   applyOnboardingModeUI();
@@ -1120,6 +1180,10 @@ function setStep(step) {
     $all(".wizard-step-indicator").forEach((el) => {
       el.classList.toggle("active", el.dataset.step === String(step));
     });
+
+    if (String(step) === "1") {
+      syncLockedDisplayNameInput();
+    }
   } else {
     // Hide wizard modal if no step (dashboard mode)
     wizard.classList.add("hidden");
@@ -1626,13 +1690,13 @@ function hideError(elementId) {
   }
 }
 
-async function handleLogin(email, password) {
+async function handleLogin(identifier, password) {
   try {
     hideError("#authError");
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     });
 
     let data;
@@ -1645,7 +1709,8 @@ async function handleLogin(email, password) {
     }
 
     if (!res.ok) {
-      showError("#authError", data.error || `Login failed (${res.status})`);
+      const detail = Array.isArray(data.details) ? data.details.map((d) => d?.message).find(Boolean) : null;
+      showError("#authError", detail || data.error || `Login failed (${res.status})`);
       return false;
     }
 
@@ -1678,13 +1743,18 @@ async function handleLogin(email, password) {
   }
 }
 
-async function handleSignup(name, email, password) {
+async function handleSignup(name, username, email, password) {
   try {
     hideError("#signupError");
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({
+        name,
+        username: String(username || "").trim(),
+        email,
+        password,
+      }),
     });
 
     let data;
@@ -1697,7 +1767,8 @@ async function handleSignup(name, email, password) {
     }
 
     if (!res.ok) {
-      showError("#signupError", data.error || `Signup failed (${res.status})`);
+      const detail = Array.isArray(data.details) ? data.details.map((d) => d?.message).find(Boolean) : null;
+      showError("#signupError", detail || data.error || `Signup failed (${res.status})`);
       return false;
     }
 
@@ -1756,6 +1827,7 @@ function handleContinueWithoutLogin() {
   
   // Initialize empty state for guest
   state = {
+    settings: { aiProvider: null },
     profile: null,
     tasks: [],
     rankedTasks: [],
@@ -1818,6 +1890,9 @@ loadUserData = async function() {
       try {
         const parsed = JSON.parse(savedState);
         state = {
+          settings: {
+            aiProvider: normalizeAiProvider(parsed?.settings?.aiProvider),
+          },
           profile: parsed.profile || null,
           tasks: parsed.tasks || [],
           rankedTasks: parsed.rankedTasks || [],
@@ -1864,6 +1939,7 @@ function handleLogout() {
     stopReflectionChecker();
     setAuthToken(null);
     state = {
+      settings: { aiProvider: null },
       profile: null,
       tasks: [],
       rankedTasks: [],
@@ -1901,22 +1977,37 @@ function initAuth() {
   // Login form
   $("#loginFormElement")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const email = $("#loginEmail").value.trim();
-    const password = $("#loginPassword").value;
-    await handleLogin(email, password);
+    const identifierEl = $("#loginIdentifier");
+    const passwordEl = $("#loginPassword");
+    if (!identifierEl || !passwordEl) return;
+    const identifier = identifierEl.value.trim();
+    const password = passwordEl.value;
+    await handleLogin(identifier, password);
   });
 
   // Signup form
   $("#signupFormElement")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const name = $("#signupName").value.trim();
-    const email = $("#signupEmail").value.trim();
-    const password = $("#signupPassword").value;
+    const nameEl = $("#signupName");
+    const usernameEl = $("#signupUsername");
+    const emailEl = $("#signupEmail");
+    const passwordEl = $("#signupPassword");
+    if (!nameEl || !usernameEl || !emailEl || !passwordEl) return;
+
+    const name = nameEl.value.trim();
+    const username = usernameEl.value.trim();
+    const email = emailEl.value.trim();
+    const password = passwordEl.value;
+
     if (password.length < 8) {
       showError("#signupError", "Password must be at least 8 characters");
       return;
     }
-    await handleSignup(name, email, password);
+    if (username.length < 3) {
+      showError("#signupError", "Username must be at least 3 characters");
+      return;
+    }
+    await handleSignup(name, username, email, password);
   });
 
   // Google auth buttons
@@ -2144,6 +2235,98 @@ function initProfileEditForm() {
   });
 }
 
+function aiProviderLabel(provider) {
+  const normalized = normalizeAiProvider(provider);
+  if (normalized === "openai") return "OpenAI";
+  if (normalized === "gemini") return "Gemini";
+  return "DeepSeek";
+}
+
+async function initAiProviderSettings() {
+  const select = document.getElementById("aiProviderSelect");
+  const help = document.getElementById("aiProviderHelp");
+  const status = document.getElementById("aiProviderSaveStatus");
+  if (!select || !help) return;
+
+  const token = getAuthToken();
+  const isGuest = !token || token.startsWith("guest_");
+
+  if (isGuest) {
+    select.innerHTML = `<option value="">Default</option>`;
+    select.disabled = true;
+    help.textContent = "AI provider selection requires an account.";
+    return;
+  }
+
+  select.disabled = true;
+  help.textContent = "Loading…";
+
+  let providers;
+  try {
+    const res = await fetch("/api/ai/providers", { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error(`Failed to load providers (${res.status})`);
+    providers = await res.json();
+  } catch (err) {
+    console.error("AI provider load error:", err);
+    select.innerHTML = `<option value="">Default</option>`;
+    select.disabled = true;
+    help.textContent = "Could not load AI provider options.";
+    return;
+  }
+
+  const supported = Array.isArray(providers.supportedProviders) ? providers.supportedProviders : [];
+  const configured = new Set(Array.isArray(providers.configuredProviders) ? providers.configuredProviders : []);
+  const defaultProvider = normalizeAiProvider(providers.defaultProvider) || "deepseek";
+  const effectiveProvider = normalizeAiProvider(providers.effectiveProvider) || defaultProvider;
+
+  const currentSelection = normalizeAiProvider(state?.settings?.aiProvider) || normalizeAiProvider(providers.selectedProvider);
+
+  select.innerHTML = "";
+
+  const defaultOpt = document.createElement("option");
+  defaultOpt.value = "";
+  defaultOpt.textContent = `Default (${aiProviderLabel(defaultProvider)})`;
+  select.appendChild(defaultOpt);
+
+  supported.forEach((p) => {
+    const normalized = normalizeAiProvider(p);
+    if (!normalized) return;
+    const opt = document.createElement("option");
+    opt.value = normalized;
+    opt.textContent = aiProviderLabel(normalized) + (configured.has(normalized) ? "" : " (not configured)");
+    opt.disabled = !configured.has(normalized);
+    select.appendChild(opt);
+  });
+
+  select.value = currentSelection || "";
+  select.disabled = false;
+  help.textContent = `Using: ${aiProviderLabel(effectiveProvider)}.`;
+
+  select.onchange = async () => {
+    const next = normalizeAiProvider(select.value);
+    state.settings = state.settings && typeof state.settings === "object" ? state.settings : { aiProvider: null };
+    state.settings.aiProvider = next;
+
+    if (status) {
+      status.textContent = "Saving…";
+      status.className = "save-status loading";
+    }
+
+    await saveUserData();
+
+    if (status) {
+      status.textContent = "Saved ✓";
+      status.className = "save-status success";
+      setTimeout(() => {
+        status.textContent = "";
+        status.className = "save-status";
+      }, 1600);
+    }
+
+    help.textContent = `Using: ${aiProviderLabel(next || defaultProvider)}.`;
+  };
+}
+
 async function initSettings() {
   // Load current user info from server if available
   const token = getAuthToken();
@@ -2197,6 +2380,8 @@ async function initSettings() {
   
   // Initialize edit learning preferences button
   initEditLearningPrefsButton();
+
+  await initAiProviderSettings();
 
   try {
     window.AxisCelebrations?.bindSettingsUi?.();
@@ -2411,10 +2596,10 @@ function initEditLearningPrefsButton() {
     btn.addEventListener("click", () => {
       // Close settings panel
       $("#settingsPanel")?.classList.add("hidden");
-      // Open onboarding wizard at step 1
+      // Open onboarding wizard at Preferences
       restoreProfileToForm();
       onboardingMode = null;
-      setStep(1);
+      setStep(2);
     });
   }
 }
@@ -2946,6 +3131,8 @@ function initDeadlineTimeOptions() {
 }
 
 function initProfileInteractions() {
+  initAgeGroupButtons();
+
   // Procrastinator yes/no buttons - remove existing listeners by cloning
   const procrastGroup = $("#is_procrastinator_group");
   if (procrastGroup && !procrastGroup.dataset.initialized) {
@@ -2963,6 +3150,7 @@ function initProfileInteractions() {
   }
 
   const buttonGroups = [
+    "#age_group_group",
     "#has_trouble_finishing_group",
   ];
 
@@ -2978,45 +3166,70 @@ function initProfileInteractions() {
       }
       group
         .querySelectorAll("button")
-        .forEach((btn) => btn.classList.toggle("selected", btn === e.target));
+        .forEach((btn) => {
+          const selected = btn === e.target;
+          btn.classList.toggle("selected", selected);
+          btn.setAttribute("aria-pressed", selected ? "true" : "false");
+        });
     });
   });
 
-  // Save profile button - ensure it's enabled and has event listener
-  const saveProfileBtn = $("#saveProfileBtn");
-  if (saveProfileBtn) {
-    // Ensure button is enabled
-    saveProfileBtn.disabled = false;
-    saveProfileBtn.removeAttribute("disabled");
-    
-    // Remove old listener if exists (clone to remove all listeners)
-    const newBtn = saveProfileBtn.cloneNode(true);
-    saveProfileBtn.parentNode?.replaceChild(newBtn, saveProfileBtn);
-    
-    // Attach fresh event listener
+  const profileContinueBtn = $("#wizardProfileContinueBtn");
+  if (profileContinueBtn) {
+    const newBtn = profileContinueBtn.cloneNode(true);
+    profileContinueBtn.parentNode?.replaceChild(newBtn, profileContinueBtn);
+
     newBtn.addEventListener("click", (e) => {
       e.preventDefault();
       const profile = readProfileFromForm();
       if (!profile) return;
+
       state.profile = profile;
-      // Read goals from onboarding form
-      readGoalsFromOnboardingForm();
-      
-      // Set first reflection due date for new users (7 days from now)
+
       if (!state.firstReflectionDueDate) {
         const dueDate = new Date();
         dueDate.setDate(dueDate.getDate() + 7);
         state.firstReflectionDueDate = dueDate.toISOString();
       }
-      
+
       saveUserData();
-      showToast("Profile saved.");
-      // Clear personalization-only mode to allow navigation to goal canvas
+      showToast("Saved. Next: preferences.");
+      setStep(2);
+    });
+  }
+
+  const preferencesBackBtn = $("#wizardPreferencesBackBtn");
+  if (preferencesBackBtn) {
+    const newBtn = preferencesBackBtn.cloneNode(true);
+    preferencesBackBtn.parentNode?.replaceChild(newBtn, preferencesBackBtn);
+    newBtn.addEventListener("click", () => setStep(1));
+  }
+
+  const preferencesContinueBtn = $("#wizardPreferencesContinueBtn");
+  if (preferencesContinueBtn) {
+    const newBtn = preferencesContinueBtn.cloneNode(true);
+    preferencesContinueBtn.parentNode?.replaceChild(newBtn, preferencesContinueBtn);
+
+    newBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const profile = readProfileFromForm();
+      if (!profile) return;
+
+      state.profile = profile;
+
+      if (!state.firstReflectionDueDate) {
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 7);
+        state.firstReflectionDueDate = dueDate.toISOString();
+      }
+
+      saveUserData();
+      showToast("Preferences saved.");
+
       onboardingMode = null;
       applyOnboardingModeUI();
-      // Go to goal canvas after profile is saved
-      setStep(2);
-      // Initialize canvas after a brief delay to ensure DOM is ready
+      setStep(3);
+
       setTimeout(() => {
         initGoalCanvas();
       }, 100);
@@ -3086,7 +3299,80 @@ function readGoalsFromOnboardingForm() {
   // The goals are saved when saveUserData() is called
 }
 
+const AXIS_AGE_GROUP_OPTIONS = [
+  "1-10",
+  "11-20",
+  "21-30",
+  "31-40",
+  "41-50",
+  "51-60",
+  "61-70",
+  "71-80",
+  "81-90",
+  "91-100",
+  "101+",
+];
+
+function initAgeGroupButtons() {
+  const group = $("#age_group_group");
+  const hidden = $("#user_age_group");
+  if (!group || !hidden) return;
+  if (group.dataset.ageButtonsBuilt === "1") return;
+  group.dataset.ageButtonsBuilt = "1";
+
+  AXIS_AGE_GROUP_OPTIONS.forEach((value) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.value = value;
+    btn.textContent = value;
+    group.insertBefore(btn, hidden);
+  });
+
+  syncAgeGroupButtons();
+}
+
+function syncAgeGroupButtons() {
+  const group = $("#age_group_group");
+  const hidden = $("#user_age_group");
+  if (!group || !hidden) return;
+  const selected = hidden.value;
+  group.querySelectorAll("button[data-value]").forEach((btn) => {
+    const isSelected = btn.dataset.value === selected;
+    btn.classList.toggle("selected", isSelected);
+    btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  });
+}
+
+function axisAgeToRange(age) {
+  if (!Number.isFinite(age) || age <= 0) return "";
+  if (age >= 101) return "101+";
+  const start = Math.floor((age - 1) / 10) * 10 + 1;
+  const end = start + 9;
+  return `${start}-${end}`;
+}
+
+function normalizeAgeGroupValue(value) {
+  if (value === null || value === undefined) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (AXIS_AGE_GROUP_OPTIONS.includes(raw)) return raw;
+
+  const parsedNumber = Number.parseInt(raw, 10);
+  if (Number.isFinite(parsedNumber) && String(parsedNumber) === raw) {
+    return axisAgeToRange(parsedNumber);
+  }
+
+  const legacyMap = {
+    "Middle School": "11-20",
+    "High School": "11-20",
+    College: "21-30",
+    Other: "31-40",
+  };
+  return legacyMap[raw] || "";
+}
+
 function readProfileFromForm() {
+  initAgeGroupButtons();
   const user_name = $("#user_name").value.trim();
   const user_age_group = $("#user_age_group").value;
   if (!user_name || !user_age_group) {
@@ -3153,8 +3439,14 @@ function readProfileFromForm() {
 function restoreProfileToForm() {
   if (!state.profile) return;
   const p = state.profile;
-  $("#user_name").value = p.user_name || "";
-  $("#user_age_group").value = p.user_age_group || "";
+  const nameInput = $("#user_name");
+  if (nameInput) {
+    nameInput.value = p.user_name || "";
+  }
+  syncLockedDisplayNameInput();
+  initAgeGroupButtons();
+  $("#user_age_group").value = normalizeAgeGroupValue(p.user_age_group);
+  syncAgeGroupButtons();
 
   // Restore weekly schedule commitments
   ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach((day) => {
@@ -3305,7 +3597,7 @@ function initTaskForm() {
       }
       rankTasks();
       renderRankedPreview();
-      setStep(3);
+      setStep(4);
     });
   }
 
@@ -4699,8 +4991,8 @@ function initGoalCanvas() {
   }
   
   // Ensure canvas is visible
-  const step2 = document.querySelector(".wizard-step[data-step='2']");
-  if (step2 && !step2.classList.contains("active")) {
+  const step3 = document.querySelector(".wizard-step[data-step='3']");
+  if (step3 && !step3.classList.contains("active")) {
     console.error("Goal canvas step is not active");
     return;
   }
@@ -4810,7 +5102,9 @@ function initGoalCanvas() {
   // Finish goals button
   const finishGoalsBtn = $("#finishGoalsBtn");
   if (finishGoalsBtn) {
-    finishGoalsBtn.addEventListener("click", () => {
+    const newBtn = finishGoalsBtn.cloneNode(true);
+    finishGoalsBtn.parentNode?.replaceChild(newBtn, finishGoalsBtn);
+    newBtn.addEventListener("click", () => {
       // Goals are already saved automatically via saveGoalCanvas()
       // Just finish onboarding
       onboardingMode = null;
@@ -4823,10 +5117,12 @@ function initGoalCanvas() {
   }
   
   // Back button
-  const backToProfileBtn = $("#backToProfileBtn");
-  if (backToProfileBtn) {
-    backToProfileBtn.addEventListener("click", () => {
-      setStep(1);
+  const backToPreferencesBtn = $("#backToPreferencesBtn");
+  if (backToPreferencesBtn) {
+    const newBtn = backToPreferencesBtn.cloneNode(true);
+    backToPreferencesBtn.parentNode?.replaceChild(newBtn, backToPreferencesBtn);
+    newBtn.addEventListener("click", () => {
+      setStep(2);
     });
   }
 }
@@ -6297,11 +6593,11 @@ function renderRankedPreview() {
 
 function initWizardButtons() {
   // Remove existing listeners by cloning and replacing elements
-  const backToProfileBtn = $("#backToProfileBtn");
-  if (backToProfileBtn) {
-    const newBtn = backToProfileBtn.cloneNode(true);
-    backToProfileBtn.parentNode?.replaceChild(newBtn, backToProfileBtn);
-    newBtn.addEventListener("click", () => setStep(1));
+  const backToPreferencesBtn = $("#backToPreferencesBtn");
+  if (backToPreferencesBtn) {
+    const newBtn = backToPreferencesBtn.cloneNode(true);
+    backToPreferencesBtn.parentNode?.replaceChild(newBtn, backToPreferencesBtn);
+    newBtn.addEventListener("click", () => setStep(2));
   }
   
   const goToConfirmBtn = $("#goToConfirmBtn");
@@ -6314,7 +6610,7 @@ function initWizardButtons() {
       }
       rankTasks();
       renderRankedPreview();
-      setStep(3);
+      setStep(4);
     });
   }
   
@@ -6326,7 +6622,9 @@ function initWizardButtons() {
       if (onboardingMode === "personalization-only") {
         return; // Block returning to tasks during personalization-only signup
       }
-      setStep(2);
+      setStep(null);
+      document.getElementById("addTaskBtn")?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      showToast("Edit tasks, then click Plan Tasks again.");
     });
   }
 
@@ -8126,7 +8424,43 @@ function initChatbot() {
 async function generateChatReply(text) {
   const name = state.profile?.user_name || "friend";
 
-  // Try backend /api/chat first
+  const token = getAuthToken();
+
+  // Prefer the authenticated agent endpoint when available (can read/update your data).
+  if (token && !token.startsWith("guest_")) {
+    try {
+      const res = await fetch("/api/assistant/agent", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ message: text }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMsg = errorData.error || `API error: ${res.status}`;
+        throw new Error(errorMsg);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (data && typeof data.data === "object" && data.data) {
+        state = data.data;
+        try {
+          restoreFromState();
+        } catch {}
+        try {
+          await axisCacheStateSnapshot();
+        } catch {}
+      }
+      if (data && typeof data.reply === "string") {
+        return data.reply;
+      }
+      throw new Error("No reply field in assistant response");
+    } catch (err) {
+      console.warn("Assistant agent API failed; falling back to chat API:", err);
+    }
+  }
+
+  // Fallback: basic chat endpoint (no access to your planner data)
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -8146,7 +8480,7 @@ async function generateChatReply(text) {
       
       // Show user-friendly error message for common issues
       if (res.status === 401 || res.status === 500) {
-        return `⚠️ API Configuration Issue: ${errorMsg}. Please check your DeepSeek API key in the .env file and restart the server. For now, I'll use a basic response: ${fallbackRuleBasedReply(text)}`;
+        return `⚠️ API Configuration Issue: ${errorMsg}. Please check your AI provider keys in the .env file and restart the server. For now, I'll use a basic response: ${fallbackRuleBasedReply(text)}`;
       }
       
       throw new Error(errorMsg);
@@ -9030,9 +9364,9 @@ function exportInsightsAsPng() {
 
   // Header
   ctx.fillStyle = "#0f172a";
-  ctx.font = "700 28px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '700 28px "Neue Montreal"';
   ctx.fillText("Axis Insights", 40, 58);
-  ctx.font = "500 14px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '500 14px "Neue Montreal"';
   ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
   ctx.fillText(new Date().toLocaleString(), 40, 82);
 
@@ -9043,10 +9377,10 @@ function exportInsightsAsPng() {
     ctx.lineWidth = 1;
     roundRect(ctx, x, y, 200, 74, 14, true, true);
     ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
-    ctx.font = "600 12px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.font = '500 12px "Neue Montreal"';
     ctx.fillText(title, x + 14, y + 26);
     ctx.fillStyle = "#16a34a";
-    ctx.font = "800 26px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.font = '700 26px "Neue Montreal"';
     ctx.fillText(value, x + 14, y + 56);
   }
 
@@ -9073,10 +9407,10 @@ function exportInsightsAsPng() {
 
   // Insights text
   ctx.fillStyle = "#0f172a";
-  ctx.font = "700 16px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '700 16px "Neue Montreal"';
   ctx.fillText("Highlights", 40, 220);
   ctx.fillStyle = "rgba(15, 23, 42, 0.75)";
-  ctx.font = "500 13px Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  ctx.font = '500 13px "Neue Montreal"';
   wrapText(ctx, metricsText, 40, 246, 920, 18);
 
   function wrapText(ctx, text, x, y, maxWidth, lineHeight) {

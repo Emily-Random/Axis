@@ -1,9 +1,11 @@
 {
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "mcp": "node mcp_server.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

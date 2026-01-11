@@ -25,5 +25,11 @@ users.json
 .vscode/
 .idea/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Icon files (macOS)
+Icon
 Icon?

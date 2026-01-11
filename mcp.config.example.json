@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "axis": {
+      "command": "node",
+      "args": ["mcp_server.mjs"],
+      "env": {
+        "AXIS_API_BASE_URL": "http://localhost:3000",
+        "AXIS_API_TOKEN": "paste-your-jwt-here"
+      }
+    }
+  }
+}
