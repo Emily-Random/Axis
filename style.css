@@ -3014,10 +3014,6 @@ textarea {
 
 /* Hero Title Gradient */
 .hero-title-gradient {
-  font-size: clamp(2.5rem, 8vw, 4.5rem);
-  font-weight: 700;
-  line-height: 1.1;
-  margin: 0 0 1.5rem;
   background: linear-gradient(135deg, var(--text-main) 0%, var(--accent-green) 50%, #e85a78 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -3282,12 +3278,22 @@ textarea {
 }
 
 .hero-title {
-  font-size: 6.4rem;
-  font-weight: 400;
+  font-size: clamp(4.25rem, 9vw, 7.75rem);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 0.92;
   font-family: var(--font-sans);
-  margin: 0;
+  margin: 0 0 1.25rem;
   padding: 0;
   text-shadow: none;
+}
+
+.hero-title-line {
+  display: block;
+}
+
+.hero-title-line:first-child {
+  font-weight: 900;
 }
 
 @keyframes fadeInUp {
@@ -3495,8 +3501,47 @@ textarea {
 }
 
 .features-section .feature-icon-wrap {
+  width: 72px;
+  height: 72px;
+  font-size: 2.15rem;
+  border-radius: 18px;
+  position: relative;
+  isolation: isolate;
   background: transparent;
   border: none;
+}
+
+.features-section .feature-icon-wrap::before {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, rgba(214, 77, 107, 0.55) 0%, rgba(214, 77, 107, 0.16) 35%, rgba(214, 77, 107, 0) 72%);
+  filter: blur(12px);
+  opacity: 0.95;
+  z-index: -1;
+  transition: opacity var(--transition-normal), transform var(--transition-normal);
+}
+
+.feature-card:hover .feature-icon-wrap::before {
+  opacity: 1;
+  transform: scale(1.04);
+}
+
+:root[data-theme="dark"] .features-section .feature-icon-wrap::before {
+  background: radial-gradient(circle at 35% 30%, rgba(255, 139, 163, 0.6) 0%, rgba(255, 139, 163, 0.18) 35%, rgba(255, 139, 163, 0) 72%);
+}
+
+.features-section .feature-icon {
+  text-shadow:
+    0 14px 36px rgba(214, 77, 107, 0.35),
+    0 0 22px rgba(214, 77, 107, 0.25);
+}
+
+:root[data-theme="dark"] .features-section .feature-icon {
+  text-shadow:
+    0 14px 36px rgba(255, 139, 163, 0.35),
+    0 0 22px rgba(255, 139, 163, 0.25);
 }
 
 .feature-icon-wrap .feature-icon {
